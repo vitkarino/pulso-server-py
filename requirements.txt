@@ -1,0 +1,6 @@
+fastapi>=0.135.0
+numpy>=2.0.0
+pydantic>=2.0.0
+scipy>=1.14.0
+uvicorn[standard]>=0.30.0
+websockets>=14.0
