@@ -122,6 +122,8 @@ class PPGProcessingService:
         metadata: RecordingMetadata,
         device_id: str | None = None,
     ):
+        if device_id is not None:
+            self._buffers.reset(device_id)
         return self._measurements.start_recording(
             duration_seconds=duration_seconds,
             metadata=metadata,
@@ -130,6 +132,9 @@ class PPGProcessingService:
 
     def stop_recording(self, recording_id: str):
         return self._measurements.stop_recording(recording_id)
+
+    def stop_recording_for_device(self, device_id: str):
+        return self._measurements.stop_recording_for_device(device_id)
 
     def stop_all_recordings(self):
         return self._measurements.stop_all()

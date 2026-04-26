@@ -13,6 +13,7 @@ class PPGSample(BaseModel):
 
 class DeviceData(BaseModel):
     id: str = Field(min_length=1)
+    recording_id: str | None = Field(default=None, min_length=1)
     temp: float | None = None
     fs: float = Field(gt=0)
     samples: list[PPGSample] = Field(min_length=1)

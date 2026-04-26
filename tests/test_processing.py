@@ -9,7 +9,12 @@ from app.processing.service import PPGProcessingService
 from app.state import MetricsStore
 
 
-def _synthetic_payload(fs: int = 25, seconds: int = 18, bpm: float = 72.0) -> str:
+def _synthetic_payload(
+    fs: int = 25,
+    seconds: int = 18,
+    bpm: float = 72.0,
+    recording_id: str | None = None,
+) -> str:
     count = fs * seconds
     t = np.arange(count) / fs
     freq = bpm / 60.0
@@ -24,14 +29,18 @@ def _synthetic_payload(fs: int = 25, seconds: int = 18, bpm: float = 72.0) -> st
     red = red_dc + red_ac * np.sin(2 * math.pi * freq * t) + rng.normal(0, 45, count)
     samples = [{"ir": float(i), "r": float(r)} for i, r in zip(ir, red, strict=True)]
 
+    device = {
+        "id": "A0:B7:65:12:34:56",
+        "temp": 31.75,
+        "fs": fs,
+        "samples": samples,
+    }
+    if recording_id is not None:
+        device["recording_id"] = recording_id
+
     return json.dumps(
         {
-            "device": {
-                "id": "A0:B7:65:12:34:56",
-                "temp": 31.75,
-                "fs": fs,
-                "samples": samples,
-            }
+            "device": device
         }
     )
 
@@ -99,7 +108,7 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(metrics.signal_quality.reason, "finger not detected: optical signal is unstable or exposed")
 
     def test_processing_keeps_bpm_but_rejects_spo2_when_perfusion_is_too_low(self) -> None:
-        config = AppConfig(min_spo2_perfusion_index=0.15)
+        config = AppConfig(min_spo2_perfusion_index=0.4)
         service = PPGProcessingService(config, MetricsStore())
 
         metrics = service.process_json(_synthetic_payload_with_amplitude(ir_ac=90.0, red_ac=70.0))
@@ -129,6 +138,42 @@ class ProcessingTests(unittest.TestCase):
         assert measurement.result is not None
         self.assertIsNotNone(measurement.result.bpm)
         self.assertIsNotNone(measurement.result.spo2)
+
+    def test_measurement_ignores_samples_for_different_recording_id(self) -> None:
+        service = PPGProcessingService(AppConfig(), MetricsStore())
+        service.start_measurement("A0:B7:65:12:34:56")
+
+        service.process_json(_synthetic_payload(recording_id="different-recording"))
+        measurement = service.get_measurement("A0:B7:65:12:34:56")
+
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(measurement.status, "running")
+        self.assertEqual(measurement.samples_collected, 0)
+
+    def test_measurement_accepts_matching_recording_id(self) -> None:
+        service = PPGProcessingService(AppConfig(measurement_duration_seconds=15.0), MetricsStore())
+        started = service.start_measurement("A0:B7:65:12:34:56")
+        assert started.id is not None
+
+        service.process_json(_synthetic_payload(recording_id=started.id))
+        measurement = service.get_measurement("A0:B7:65:12:34:56")
+
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(measurement.status, "completed")
+        self.assertEqual(measurement.samples_collected, 375)
+
+    def test_measurement_can_stop_active_recording_by_device_id(self) -> None:
+        service = PPGProcessingService(AppConfig(), MetricsStore())
+        service.start_measurement("A0:B7:65:12:34:56")
+        service.process_json(_synthetic_payload(seconds=2))
+
+        stopped = service.stop_recording_for_device("A0:B7:65:12:34:56")
+
+        self.assertIsNotNone(stopped)
+        assert stopped is not None
+        self.assertEqual(stopped.status, "stopped")
 
 
 if __name__ == "__main__":

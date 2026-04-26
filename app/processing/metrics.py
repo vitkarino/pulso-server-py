@@ -61,7 +61,8 @@ class VitalSignsCalculator:
                 quality=quality,
             )
 
-        spo2_estimate = self._estimate_spo2(raw_ir, raw_red, filtered_ir, filtered_red)
+        peaks = self._find_peaks(filtered_ir, fs)
+        spo2_estimate = self._estimate_spo2(raw_ir, raw_red, filtered_ir, filtered_red, peaks)
         contact_problem = self._contact_problem(raw_ir, raw_red, spo2_estimate.perfusion_index)
         if contact_problem is not None:
             quality = SignalQuality(
@@ -82,7 +83,7 @@ class VitalSignsCalculator:
                 quality=quality,
             )
 
-        bpm_estimate = self._estimate_bpm(filtered_ir, fs)
+        bpm_estimate = self._estimate_bpm(filtered_ir, fs, peaks)
         confidence = self._sensor_confidence(
             window_seconds=window_seconds,
             bpm=bpm_estimate.bpm,
@@ -119,10 +120,10 @@ class VitalSignsCalculator:
             quality=quality,
         )
 
-    def _estimate_bpm(self, filtered_ir: np.ndarray, fs: float) -> BPMEstimate:
+    def _find_peaks(self, filtered_ir: np.ndarray, fs: float) -> np.ndarray:
         signal_std = float(np.std(filtered_ir))
         if signal_std <= 1e-9:
-            return BPMEstimate(bpm=None, peak_count=0, regularity_score=0.0, reason="filtered IR channel is flat")
+            return np.empty(0, dtype=int)
 
         min_distance = max(1, int(round(fs * 60.0 / self._config.max_bpm)))
         prominence = max(signal_std * 0.35, 1e-9)
@@ -131,6 +132,27 @@ class VitalSignsCalculator:
             distance=min_distance,
             prominence=prominence,
         )
+        if len(peaks) >= self._config.min_peaks:
+            return peaks
+
+        median = float(np.median(filtered_ir))
+        mad = float(np.median(np.abs(filtered_ir - median)))
+        if mad <= 0:
+            return peaks
+        relaxed = max(1.4826 * mad * 0.5, 1e-9)
+        if relaxed >= prominence:
+            return peaks
+        retry, _ = signal.find_peaks(
+            filtered_ir,
+            distance=min_distance,
+            prominence=relaxed,
+        )
+        return retry if len(retry) > len(peaks) else peaks
+
+    def _estimate_bpm(self, filtered_ir: np.ndarray, fs: float, peaks: np.ndarray) -> BPMEstimate:
+        signal_std = float(np.std(filtered_ir))
+        if signal_std <= 1e-9:
+            return BPMEstimate(bpm=None, peak_count=0, regularity_score=0.0, reason="filtered IR channel is flat")
 
         if len(peaks) >= self._config.min_peaks:
             intervals = np.diff(peaks) / fs
@@ -184,7 +206,21 @@ class VitalSignsCalculator:
         noise_floor = float(np.median(band_power)) + 1e-12
         if peak_power / noise_floor < 3.0:
             return None
-        return round(float(band_freq[peak_index] * 60.0), 1)
+
+        chosen_freq = float(band_freq[peak_index])
+        # Guard against locking onto the 2nd harmonic of the pulse: if a comparable
+        # peak sits near f/2 inside the valid band, prefer the lower fundamental.
+        half_freq = chosen_freq / 2.0
+        if half_freq >= self._config.min_bpm / 60.0:
+            tolerance = max(0.1 * half_freq, frequencies[1] - frequencies[0] if frequencies.size > 1 else 0.0)
+            half_mask = (band_freq >= half_freq - tolerance) & (band_freq <= half_freq + tolerance)
+            if np.any(half_mask):
+                half_band = band_power[half_mask]
+                half_power = float(np.max(half_band))
+                if half_power >= peak_power * 0.5:
+                    half_freqs = band_freq[half_mask]
+                    chosen_freq = float(half_freqs[int(np.argmax(half_band))])
+        return round(chosen_freq * 60.0, 1)
 
     @staticmethod
     def _reject_interval_outliers(intervals: np.ndarray) -> np.ndarray:
@@ -214,13 +250,14 @@ class VitalSignsCalculator:
         raw_red: np.ndarray,
         filtered_ir: np.ndarray,
         filtered_red: np.ndarray,
+        peaks: np.ndarray,
     ) -> SpO2Estimate:
         ir_dc = float(np.mean(raw_ir))
         red_dc = float(np.mean(raw_red))
-        ir_ac = float(np.sqrt(np.mean(np.square(filtered_ir))))
-        red_ac = float(np.sqrt(np.mean(np.square(filtered_red))))
+        ir_ac = self._pulsatile_ac(filtered_ir, peaks)
+        red_ac = self._pulsatile_ac(filtered_red, peaks)
 
-        if min(ir_dc, red_dc, ir_ac, red_ac) <= 0:
+        if min(ir_dc, red_dc) <= 0 or ir_ac is None or red_ac is None or min(ir_ac, red_ac) <= 0:
             return SpO2Estimate(spo2=None, ratio=None, perfusion_index=None, reason="SpO2 not reported: no usable AC/DC components")
 
         perfusion_index = (ir_ac / ir_dc) * 100.0
@@ -253,6 +290,28 @@ class VitalSignsCalculator:
             ratio=round(float(ratio), 4),
             perfusion_index=float(perfusion_index),
         )
+
+    @staticmethod
+    def _pulsatile_ac(filtered: np.ndarray, peaks: np.ndarray) -> float | None:
+        if peaks.size >= 2:
+            amplitudes: list[float] = []
+            for i in range(peaks.size - 1):
+                start = int(peaks[i])
+                end = int(peaks[i + 1])
+                if end <= start:
+                    continue
+                segment = filtered[start : end + 1]
+                trough = float(np.min(segment))
+                amplitude = float(filtered[start]) - trough
+                if amplitude > 0:
+                    amplitudes.append(amplitude)
+            if amplitudes:
+                return float(np.median(amplitudes))
+
+        rms = float(np.sqrt(np.mean(np.square(filtered))))
+        if rms <= 0:
+            return None
+        return rms * 2.0 * float(np.sqrt(2.0))
 
     def _contact_problem(
         self,

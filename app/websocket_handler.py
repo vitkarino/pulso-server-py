@@ -67,7 +67,7 @@ class WebSocketController:
                     device_id = hello_device_id
                     await websocket.send_json({"ok": True, "type": "hello_ack"})
                     continue
-                if self._is_device_control_message(message):
+                if self._handle_device_control_message(message, device_id):
                     continue
 
                 try:
@@ -87,6 +87,7 @@ class WebSocketController:
                         await self.send_stop(device_id=recording.device_id)
         except WebSocketDisconnect:
             if device_id is not None:
+                self._service.stop_recording_for_device(device_id)
                 self._unregister(device_id, websocket)
             return
 
@@ -107,8 +108,7 @@ class WebSocketController:
             self._connections[device_id] = websocket
         return device_id
 
-    @staticmethod
-    def _is_device_control_message(message: str) -> bool:
+    def _handle_device_control_message(self, message: str, device_id: str | None) -> bool:
         try:
             payload = json.loads(message)
         except json.JSONDecodeError:
@@ -117,7 +117,17 @@ class WebSocketController:
         if not isinstance(payload, dict):
             return False
         message_type = payload.get("type")
-        return message_type in {"start_ack", "stop_ack", "log"}
+        if message_type in {"start_ack", "stop_ack", "log"}:
+            return True
+        if message_type != "finished":
+            return False
+
+        recording_id = payload.get("recording_id")
+        if isinstance(recording_id, str) and recording_id:
+            self._service.stop_recording(recording_id)
+        elif device_id is not None:
+            self._service.stop_recording_for_device(device_id)
+        return True
 
     def _connection_for(self, device_id: str) -> WebSocket | None:
         with self._lock:

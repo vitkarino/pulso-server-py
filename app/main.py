@@ -156,7 +156,6 @@ async def start_recording(
     project_name: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
 ) -> object:
-    _require_database()
     try:
         recording = processing_service.start_recording(
             duration_seconds=duration,
@@ -185,7 +184,6 @@ async def start_recording(
 
 @app.post("/api/recordings/stop-all")
 async def stop_all_recordings() -> dict[str, object]:
-    _require_database()
     recordings = processing_service.stop_all_recordings()
     stopped_devices: list[str] = []
     for recording in recordings:
@@ -241,12 +239,14 @@ def get_recording(recording_id: str) -> object:
 
 @app.post("/api/recordings/{recording_id}/stop")
 async def stop_recording(recording_id: str) -> object:
-    _require_database()
     stopped = processing_service.stop_recording(recording_id)
     if stopped is not None:
         if stopped.device_id is not None:
             await ws_controller.send_stop(device_id=stopped.device_id)
         return stopped
+
+    if not processing_service.database_enabled:
+        raise HTTPException(status_code=404, detail="recording not found")
 
     recording = processing_service.get_recording(recording_id)
     if recording is None:

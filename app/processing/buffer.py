@@ -54,6 +54,13 @@ class DeviceSignalBuffer:
                 samples_seen=self._samples_seen,
             )
 
+    def clear(self) -> None:
+        with self._lock:
+            self._ir.clear()
+            self._red.clear()
+            self._fs = None
+            self._samples_seen = 0
+
 
 class DeviceBufferRegistry:
     def __init__(self, config: AppConfig) -> None:
@@ -68,3 +75,9 @@ class DeviceBufferRegistry:
                 buffer = DeviceSignalBuffer(self._config)
                 self._buffers[device_id] = buffer
         return buffer.append(samples=samples, fs=fs)
+
+    def reset(self, device_id: str) -> None:
+        with self._lock:
+            buffer = self._buffers.get(device_id)
+        if buffer is not None:
+            buffer.clear()

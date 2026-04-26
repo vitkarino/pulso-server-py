@@ -51,7 +51,7 @@ class AppConfig:
     spo2_a: float = _float_env("SPO2_A", -45.060)
     spo2_b: float = _float_env("SPO2_B", 30.354)
     spo2_c: float = _float_env("SPO2_C", 94.845)
-    spo2_offset: float = _float_env("SPO2_OFFSET", 0.0)
+    spo2_offset: float = _float_env("SPO2_OFFSET", -1.8)
 
 
 settings = AppConfig()

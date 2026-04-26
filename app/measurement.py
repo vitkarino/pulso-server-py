@@ -63,6 +63,9 @@ class MeasurementSession:
         if self.status != "running":
             return self.result, [], self.recording_update()
 
+        if device.recording_id is not None and device.recording_id != self.id:
+            return None, [], {}
+
         if self.device_id is None:
             self.device_id = device.id
         elif self.device_id != device.id:
@@ -73,10 +76,6 @@ class MeasurementSession:
         elif self._fs != device.fs:
             self._fail("sampling frequency changed during measurement")
             return None, [], self.recording_update()
-
-        if self._wall_clock_duration_elapsed():
-            result = self._finish(status="completed", noise_filter=noise_filter, calculator=calculator)
-            return result, [], self.recording_update()
 
         self._temperature = device.temp
         sample_rows = self._append_samples(self._samples_for_buffer_duration(device.samples))
@@ -241,7 +240,7 @@ class MeasurementSession:
         self.reason = reason
 
     def _duration_ready(self) -> bool:
-        return self._wall_clock_duration_elapsed() or self._buffer_duration_elapsed()
+        return self._buffer_duration_elapsed()
 
     def _wall_clock_duration_elapsed(self) -> bool:
         if self.duration_seconds is None:
@@ -254,15 +253,18 @@ class MeasurementSession:
         return len(self._ir) >= max(1, int(ceil(self.duration_seconds * self._fs)))
 
     def _calculation_fs(self) -> float | None:
+        if self._fs is not None:
+            return self._fs
+
         effective_fs = self._effective_fs()
         if self.duration_seconds is None:
-            return effective_fs or self._fs
+            return effective_fs
 
         end_time = self.completed_at or datetime.now(UTC)
         elapsed_seconds = max(0.0, (end_time - self.started_at).total_seconds())
         if elapsed_seconds >= self.duration_seconds * 0.8:
-            return effective_fs or self._fs
-        return self._fs
+            return effective_fs
+        return None
 
     def _effective_fs(self) -> float | None:
         end_time = self.completed_at or datetime.now(UTC)
@@ -402,6 +404,14 @@ class MeasurementManager:
         if was_running and result is not None:
             self._print_result(result)
         return snapshot
+
+    def stop_recording_for_device(self, device_id: str) -> MeasurementState | None:
+        with self._lock:
+            recording_id = self._recording_by_device.get(device_id)
+            if recording_id is None:
+                return None
+
+        return self.stop_recording(recording_id)
 
     def stop_all(self) -> list[MeasurementState]:
         operations: list[tuple[str, list[dict[str, Any]], dict[str, Any]]] = []
