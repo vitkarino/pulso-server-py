@@ -16,6 +16,36 @@ WebSocket input:
 
 ```text
 ws://localhost:8080/ws
+ws://localhost:8080/ws/esp32
+```
+
+Live signal broadcast for UI charts:
+
+```text
+ws://localhost:8080/recordings/live
+```
+
+During an active recording, `/recordings/live` broadcasts each processed device batch:
+
+```json
+{
+  "type": "recording_sample_batch",
+  "recording_id": "recording uuid",
+  "device_id": "F4:65:0B:55:2E:80",
+  "fs": 25,
+  "temperature": 25.6,
+  "sample_count": 25,
+  "samples": [
+    {
+      "ir": 133000,
+      "r": 99300
+    }
+  ],
+  "metrics": {
+    "bpm": 71.4,
+    "spo2": 98.0
+  }
+}
 ```
 
 Latest metrics:

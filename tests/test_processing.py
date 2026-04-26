@@ -7,6 +7,7 @@ import numpy as np
 from app.config import AppConfig
 from app.processing.service import PPGProcessingService
 from app.state import MetricsStore
+from app.websocket_handler import WebSocketController
 
 
 def _synthetic_payload(
@@ -174,6 +175,25 @@ class ProcessingTests(unittest.TestCase):
         self.assertIsNotNone(stopped)
         assert stopped is not None
         self.assertEqual(stopped.status, "stopped")
+
+    def test_live_sample_payload_contains_recording_samples_and_metrics(self) -> None:
+        service = PPGProcessingService(AppConfig(), MetricsStore())
+        started = service.start_measurement("A0:B7:65:12:34:56")
+        assert started.id is not None
+        raw_payload = _synthetic_payload(seconds=1, recording_id=started.id)
+
+        metrics = service.process_json(raw_payload)
+        live_payload = WebSocketController._live_sample_payload(raw_payload, metrics)
+
+        self.assertIsNotNone(live_payload)
+        assert live_payload is not None
+        self.assertEqual(live_payload["type"], "recording_sample_batch")
+        self.assertEqual(live_payload["recording_id"], started.id)
+        self.assertEqual(live_payload["device_id"], "A0:B7:65:12:34:56")
+        self.assertEqual(live_payload["fs"], 25)
+        self.assertEqual(live_payload["sample_count"], 25)
+        self.assertEqual(len(live_payload["samples"]), 25)
+        self.assertEqual(live_payload["metrics"]["device_id"], "A0:B7:65:12:34:56")
 
 
 if __name__ == "__main__":

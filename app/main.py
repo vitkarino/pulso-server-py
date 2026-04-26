@@ -65,7 +65,10 @@ def get_metrics() -> dict[str, object]:
 
 @app.get("/devices")
 def get_connected_devices() -> dict[str, object]:
-    return {"devices": ws_controller.connected_devices()}
+    return {
+        "devices": ws_controller.connected_devices(),
+        "live_subscribers": ws_controller.live_subscriber_count(),
+    }
 
 
 @app.get("/metrics/{device_id}")
@@ -267,6 +270,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 @app.websocket("/ws/esp32")
 async def esp32_websocket_endpoint(websocket: WebSocket) -> None:
     await ws_controller.handle(websocket)
+
+
+@app.websocket("/recordings/live")
+async def live_websocket_endpoint(websocket: WebSocket) -> None:
+    await ws_controller.handle_live(websocket)
 
 
 def _require_database() -> None:

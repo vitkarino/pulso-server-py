@@ -14,10 +14,15 @@ class WebSocketController:
         self._service = service
         self._lock = RLock()
         self._connections: dict[str, WebSocket] = {}
+        self._live_subscribers: set[WebSocket] = set()
 
     def connected_devices(self) -> list[str]:
         with self._lock:
             return sorted(self._connections)
+
+    def live_subscriber_count(self) -> int:
+        with self._lock:
+            return len(self._live_subscribers)
 
     async def send_start(
         self,
@@ -73,6 +78,7 @@ class WebSocketController:
                 try:
                     metrics, completed_recordings = self._service.process_json_with_recordings(message)
                     ack = WebSocketAck(ok=True, metrics=metrics)
+                    await self._broadcast_live_sample_batch(message, metrics)
                 except ValidationError as exc:
                     ack = WebSocketAck(ok=False, error=exc.errors()[0]["msg"])
                     completed_recordings = []
@@ -90,6 +96,19 @@ class WebSocketController:
                 self._service.stop_recording_for_device(device_id)
                 self._unregister(device_id, websocket)
             return
+
+    async def handle_live(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        with self._lock:
+            self._live_subscribers.add(websocket)
+        try:
+            await websocket.send_json({"type": "live_ack", "ok": True})
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            self._unregister_live(websocket)
+        except RuntimeError:
+            self._unregister_live(websocket)
 
     def _handle_hello(self, websocket: WebSocket, message: str) -> str | None:
         try:
@@ -137,3 +156,57 @@ class WebSocketController:
         with self._lock:
             if self._connections.get(device_id) is websocket:
                 del self._connections[device_id]
+
+    async def _broadcast_live_sample_batch(self, message: str | bytes, metrics: object) -> None:
+        payload = self._live_sample_payload(message, metrics)
+        if payload is None:
+            return
+
+        with self._lock:
+            subscribers = list(self._live_subscribers)
+
+        stale: list[WebSocket] = []
+        for subscriber in subscribers:
+            try:
+                await subscriber.send_json(payload)
+            except RuntimeError:
+                stale.append(subscriber)
+
+        for subscriber in stale:
+            self._unregister_live(subscriber)
+
+    @staticmethod
+    def _live_sample_payload(message: str | bytes, metrics: object) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(message)
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+        device = payload.get("device")
+        if not isinstance(device, dict):
+            return None
+
+        recording_id = device.get("recording_id")
+        if not isinstance(recording_id, str) or not recording_id:
+            return None
+
+        samples = device.get("samples")
+        if not isinstance(samples, list):
+            return None
+
+        return {
+            "type": "recording_sample_batch",
+            "recording_id": recording_id,
+            "device_id": device.get("id"),
+            "fs": device.get("fs"),
+            "temperature": device.get("temp"),
+            "sample_count": len(samples),
+            "samples": samples,
+            "metrics": metrics.model_dump(mode="json"),
+        }
+
+    def _unregister_live(self, websocket: WebSocket) -> None:
+        with self._lock:
+            self._live_subscribers.discard(websocket)
