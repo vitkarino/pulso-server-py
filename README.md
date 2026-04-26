@@ -5,8 +5,12 @@ Backend for receiving PPG samples over WebSocket, filtering the red/IR signal, a
 ## Run
 
 ```bash
+export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/pulso"
 python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
+
+`DATABASE_URL` enables PostgreSQL persistence for recordings. On startup the app creates the
+`recordings` and `recordings_samples` tables when they do not exist.
 
 WebSocket input:
 
@@ -29,6 +33,24 @@ POST http://localhost:8080/measurements/{device_id}/start?duration_seconds=15
 GET http://localhost:8080/measurements/{device_id}
 GET http://localhost:8080/measurements
 ```
+
+Recordings API:
+
+```text
+POST http://localhost:8080/api/recordings/start
+POST http://localhost:8080/api/recordings/start?duration=15
+POST http://localhost:8080/api/recordings/{id}/stop
+POST http://localhost:8080/api/recordings/stop-all
+GET  http://localhost:8080/api/recordings/{id}
+GET  http://localhost:8080/api/recordings?limit=100&offset=0&date_from=2026-04-01&date_to=2026-04-26
+GET  http://localhost:8080/api/recordings/{id}/samples?limit=1000&offset=0
+GET  http://localhost:8080/api/recordings/{id}/extract?format=json
+GET  http://localhost:8080/api/recordings/{id}/extract?format=csv
+GET  http://localhost:8080/api/recordings/extract?format=json
+GET  http://localhost:8080/api/recordings/extract?format=csv
+```
+
+`date_from` and `date_to` filter by `started_at`. Date-only values use UTC day bounds.
 
 Healthcheck:
 

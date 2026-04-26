@@ -57,11 +57,12 @@ class WebSocketAck(BaseModel):
 
 
 class MeasurementState(BaseModel):
-    device_id: str
-    status: Literal["running", "completed", "failed"]
+    id: str | None = None
+    device_id: str | None = None
+    status: Literal["running", "completed", "stopped", "failed"]
     started_at: datetime
     completed_at: datetime | None = None
-    duration_seconds: float
+    duration_seconds: float | None
     elapsed_seconds: float
     progress: float = Field(ge=0.0, le=1.0)
     samples_collected: int

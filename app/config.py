@@ -27,6 +27,7 @@ def _bool_env(name: str, default: bool) -> bool:
 class AppConfig:
     host: str = os.getenv("HOST", "0.0.0.0")
     ws_port: int = _int_env("WS_PORT", 8080)
+    database_url: str | None = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
 
     min_bpm: float = _float_env("MIN_BPM", 40.0)
     max_bpm: float = _float_env("MAX_BPM", 180.0)
@@ -44,7 +45,7 @@ class AppConfig:
     min_red_dc: float = _float_env("MIN_RED_DC", 10_000.0)
     max_sensor_dc: float = _float_env("MAX_SENSOR_DC", 250_000.0)
     min_perfusion_index: float = _float_env("MIN_PERFUSION_INDEX", 0.05)
-    min_spo2_perfusion_index: float = _float_env("MIN_SPO2_PERFUSION_INDEX", 0.15)
+    min_spo2_perfusion_index: float = _float_env("MIN_SPO2_PERFUSION_INDEX", 0.05)
     max_perfusion_index: float = _float_env("MAX_PERFUSION_INDEX", 20.0)
 
     spo2_a: float = _float_env("SPO2_A", -45.060)
