@@ -4,12 +4,13 @@ from io import StringIO
 import json
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import settings
 from app.measurement import RecordingMetadata
+from app.models import ProjectCreate, ProjectUpdate, UserCreate, UserUpdate
 from app.processing.service import PPGProcessingService
 from app.recording_repository import RecordingRepository
 from app.state import metrics_store
@@ -77,6 +78,107 @@ def get_device_metrics(device_id: str) -> object:
     if metrics is None:
         raise HTTPException(status_code=404, detail="device metrics not found")
     return metrics
+
+
+@app.get("/api/projects")
+def list_projects() -> dict[str, object]:
+    _require_database()
+    return {"projects": recording_repository.list_projects()}
+
+
+@app.post("/api/projects", status_code=201)
+def create_project(project: ProjectCreate) -> object:
+    _require_database()
+    return recording_repository.create_project(project.model_dump())
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(project_id: int) -> object:
+    _require_database()
+    return _get_project_or_404(project_id)
+
+
+@app.patch("/api/projects/{project_id}")
+def update_project(project_id: int, project: ProjectUpdate) -> object:
+    _require_database()
+    updated = recording_repository.update_project(
+        project_id,
+        project.model_dump(exclude_unset=True),
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return updated
+
+
+@app.delete("/api/projects/{project_id}", status_code=204)
+def delete_project(project_id: int) -> Response:
+    _require_database()
+    if not recording_repository.delete_project(project_id):
+        raise HTTPException(status_code=404, detail="project not found")
+    return Response(status_code=204)
+
+
+@app.get("/api/projects/{project_id}/users")
+def list_project_users(project_id: int) -> dict[str, object]:
+    _require_database()
+    _get_project_or_404(project_id)
+    return {"users": recording_repository.list_project_users(project_id)}
+
+
+@app.get("/api/projects/{project_id}/users/{user_id}")
+def add_project_user(project_id: int, user_id: int) -> object:
+    _require_database()
+    _get_project_or_404(project_id)
+    _get_user_or_404(user_id)
+    return recording_repository.add_project_user(project_id, user_id)
+
+
+@app.delete("/api/projects/{project_id}/users/{user_id}", status_code=204)
+def delete_project_user(project_id: int, user_id: int) -> Response:
+    _require_database()
+    _get_project_or_404(project_id)
+    _get_user_or_404(user_id)
+    if not recording_repository.delete_project_user(project_id, user_id):
+        raise HTTPException(status_code=404, detail="project user not found")
+    return Response(status_code=204)
+
+
+@app.get("/api/users")
+def list_users() -> dict[str, object]:
+    _require_database()
+    return {"users": recording_repository.list_users()}
+
+
+@app.post("/api/users", status_code=201)
+def create_user(user: UserCreate) -> object:
+    _require_database()
+    return recording_repository.create_user(user.model_dump())
+
+
+@app.get("/api/users/{user_id}")
+def get_user(user_id: int) -> object:
+    _require_database()
+    return _get_user_or_404(user_id)
+
+
+@app.patch("/api/users/{user_id}")
+def update_user(user_id: int, user: UserUpdate) -> object:
+    _require_database()
+    updated = recording_repository.update_user(
+        user_id,
+        user.model_dump(exclude_unset=True),
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return updated
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+def delete_user(user_id: int) -> Response:
+    _require_database()
+    if not recording_repository.delete_user(user_id):
+        raise HTTPException(status_code=404, detail="user not found")
+    return Response(status_code=204)
 
 
 @app.post("/measurements/{device_id}/start")
@@ -287,6 +389,20 @@ def _get_recording_or_404(recording_id: str) -> dict[str, object]:
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
     return recording
+
+
+def _get_project_or_404(project_id: int) -> dict[str, object]:
+    project = recording_repository.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return project
+
+
+def _get_user_or_404(user_id: int) -> dict[str, object]:
+    user = recording_repository.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return user
 
 
 def _parse_date_bound(raw_value: str | None, *, end_of_day: bool) -> datetime | None:

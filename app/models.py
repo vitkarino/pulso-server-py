@@ -69,3 +69,25 @@ class MeasurementState(BaseModel):
     samples_collected: int
     result: VitalSigns | None = None
     reason: str | None = None
+
+
+class UserCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    age: int | None = Field(default=None, ge=0, le=150)
+    sex: str | None = Field(default=None, max_length=32)
+
+
+class UserUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    age: int | None = Field(default=None, ge=0, le=150)
+    sex: str | None = Field(default=None, max_length=32)
+
+
+class ProjectCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+
+
+class ProjectUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None

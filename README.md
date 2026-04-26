@@ -5,12 +5,16 @@ Backend for receiving PPG samples over WebSocket, filtering the red/IR signal, a
 ## Run
 
 ```bash
-export DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/pulso"
 python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-`DATABASE_URL` enables PostgreSQL persistence for recordings. On startup the app creates the
-`recordings` and `recordings_samples` tables when they do not exist.
+The backend loads `.env` automatically. `DATABASE_URL` or `POSTGRES_DSN` enables PostgreSQL
+persistence. If a full DSN is not set, the app can build one from `POSTGRES_HOST`,
+`POSTGRES_PORT`, `POSTGRES_PASSWORD`, `POSTGRES_USER`, and `POSTGRES_DB`; the default database
+user is `vitkarino` and the default database name is `pulso`.
+
+On startup the app creates the `users`, `projects`, `project_users`, `recordings`, and
+`recordings_samples` tables when they do not exist.
 
 WebSocket input:
 
@@ -81,6 +85,29 @@ GET  http://localhost:8080/api/recordings/extract?format=csv
 ```
 
 `date_from` and `date_to` filter by `started_at`. Date-only values use UTC day bounds.
+
+Projects API:
+
+```text
+GET    http://localhost:8080/api/projects
+GET    http://localhost:8080/api/projects/{id}
+POST   http://localhost:8080/api/projects
+PATCH  http://localhost:8080/api/projects/{id}
+DELETE http://localhost:8080/api/projects/{id}
+GET    http://localhost:8080/api/projects/{id}/users
+GET    http://localhost:8080/api/projects/{id}/users/{userId}
+DELETE http://localhost:8080/api/projects/{id}/users/{userId}
+```
+
+Users API:
+
+```text
+GET    http://localhost:8080/api/users
+GET    http://localhost:8080/api/users/{id}
+POST   http://localhost:8080/api/users
+PATCH  http://localhost:8080/api/users/{id}
+DELETE http://localhost:8080/api/users/{id}
+```
 
 Healthcheck:
 
