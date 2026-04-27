@@ -21,6 +21,7 @@ const int pulseWidth = 411;
 const int adcRange = 4096;
 
 const size_t batchSize = 25;
+const unsigned long reportedSampleIntervalMs = 1000UL / reportedSampleRate;
 const unsigned long wifiReconnectIntervalMs = 5000;
 const unsigned long temperatureReadIntervalMs = 5000;
 
@@ -49,7 +50,7 @@ unsigned long lastWiFiReconnectMs = 0;
 unsigned long lastTemperatureReadMs = 0;
 float lastTemperatureC = NAN;
 size_t streamSamplesCollected = 0;
-size_t targetStreamSamples = 0;
+unsigned long nextReportedSampleAtMs = 0;
 
 void sendHello();
 void sendLog(const char *message);
@@ -191,10 +192,7 @@ void startStreaming(const char *recordingId, unsigned long durationMs) {
   streamStartedAtMs = millis();
   batchCount = 0;
   streamSamplesCollected = 0;
-  targetStreamSamples = 0;
-  if (durationMs > 0) {
-    targetStreamSamples = max((size_t)1, (size_t)((durationMs * (unsigned long)reportedSampleRate + 999UL) / 1000UL));
-  }
+  nextReportedSampleAtMs = streamStartedAtMs;
   canStream = true;
 
   particleSensor.clearFIFO();
@@ -210,7 +208,7 @@ void stopStreaming(bool clearRecording) {
   streamStartedAtMs = 0;
   batchCount = 0;
   streamSamplesCollected = 0;
-  targetStreamSamples = 0;
+  nextReportedSampleAtMs = 0;
 
   if (clearRecording) {
     activeRecordingId[0] = '\0';
@@ -312,20 +310,21 @@ void collectSamplesFromFIFO() {
     uint32_t redValue = particleSensor.getFIFORed();
 
     particleSensor.nextSample();
-    addSampleToBatch(irValue, redValue);
+
+    unsigned long now = millis();
+    if ((long)(now - nextReportedSampleAtMs) >= 0) {
+      addSampleToBatch(irValue, redValue);
+      nextReportedSampleAtMs = now + reportedSampleIntervalMs;
+    }
   }
 }
 
 bool streamDurationFinished() {
-  if (targetStreamSamples > 0 && streamSamplesCollected >= targetStreamSamples) {
-    return true;
-  }
-
   if (streamDurationMs == 0) {
     return false;
   }
 
-  return (unsigned long)(millis() - streamStartedAtMs) >= streamDurationMs + 2000UL;
+  return (unsigned long)(millis() - streamStartedAtMs) >= streamDurationMs;
 }
 
 void handleStartCommand(JsonObject payload) {

@@ -1,0 +1,1363 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <title>Документація програми Pulso PPG Backend</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+    }
+
+    :root {
+      --ink: #17202a;
+      --muted: #5d6978;
+      --line: #d7dde5;
+      --soft: #f4f7fb;
+      --accent: #1565c0;
+      --accent-dark: #0b3d73;
+      --green: #0f766e;
+      --warn: #9a3412;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0 20em;
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11.2pt;
+      line-height: 1.46;
+      background: #ffffff;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.2;
+      color: #0f172a;
+      break-after: avoid;
+    }
+
+    h1 {
+      margin: 0 0 10mm;
+      font-size: 27pt;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 12mm 0 4mm;
+      padding-bottom: 1.8mm;
+      border-bottom: 1px solid var(--line);
+      font-size: 17pt;
+    }
+
+    h3 {
+      margin: 7mm 0 2mm;
+      font-size: 13pt;
+    }
+
+    p {
+      margin: 0 0 3.2mm;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    code,
+    pre {
+      font-family: Menlo, Consolas, "Courier New", monospace;
+    }
+
+    code {
+      font-size: 0.92em;
+      border-radius: 4px;
+      padding: 0.3mm 0.8mm;
+    }
+
+    pre {
+      margin: 3mm 0 5mm;
+      padding: 3.5mm;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0f172a;
+      color: #e5edf6;
+      border-radius: 6px;
+      font-size: 8.6pt;
+      line-height: 1.35;
+      break-inside: avoid;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 3.5mm 0 6mm;
+      font-size: 9.4pt;
+      break-inside: avoid;
+    }
+
+    th,
+    td {
+      vertical-align: top;
+      border: 1px solid var(--line);
+      padding: 2.3mm 2.6mm;
+    }
+
+    th {
+      background: #e8f0fb;
+      color: #0f2f5f;
+      font-weight: 700;
+    }
+
+    ul,
+    ol {
+      margin-top: 1.5mm;
+      margin-bottom: 4mm;
+      padding-left: 7mm;
+    }
+
+    li {
+      margin-bottom: 1.5mm;
+    }
+
+    .cover {
+      min-height: 248mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 14mm 0 8mm;
+      page-break-after: always;
+    }
+
+    .cover-top {
+      border-left: 5mm solid var(--accent);
+      padding-left: 7mm;
+    }
+
+    .subtitle {
+      max-width: 170mm;
+      color: var(--muted);
+      font-size: 14pt;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 38mm 1fr;
+      gap: 2mm 5mm;
+      margin-top: 14mm;
+      font-size: 10.4pt;
+    }
+
+    .meta-grid div:nth-child(odd) {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2mm;
+      margin-top: 9mm;
+    }
+
+    .badge {
+      border: 1px solid #b8c7db;
+      background: #f7fbff;
+      color: #173b63;
+      border-radius: 999px;
+      padding: 1.4mm 3mm;
+      font-size: 9.4pt;
+      white-space: nowrap;
+    }
+
+    .note,
+    .warning,
+    .formula,
+    .diagram,
+    .toc {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 4mm;
+      margin: 4mm 0 6mm;
+      break-inside: avoid;
+    }
+
+    .note {
+      background: #f7fbff;
+    }
+
+    .warning {
+      border-color: #fed7aa;
+      background: #fff7ed;
+      color: #7c2d12;
+    }
+
+    .formula {
+      background: #f8fafc;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 11.2pt;
+    }
+
+    .diagram {
+      background: #f8fafc;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 2mm;
+      margin-top: 2mm;
+    }
+
+    .flow div {
+      border: 1px solid #b8c7db;
+      background: #ffffff;
+      border-radius: 6px;
+      padding: 2.5mm;
+      min-height: 20mm;
+      font-size: 9.2pt;
+    }
+
+    .flow strong {
+      display: block;
+      color: var(--accent-dark);
+      margin-bottom: 1mm;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6mm;
+    }
+
+    .small {
+      font-size: 9.3pt;
+      color: var(--muted);
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+
+    .status-ok {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .status-warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .ref-list {
+      padding-left: 8mm;
+    }
+
+    .ref-list li {
+      margin-bottom: 2.6mm;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div>
+      <div class="cover-top">
+        <h1>Документація програми Pulso PPG Backend</h1>
+        <p class="subtitle">
+          Детальний опис роботи системи збору фотоплетизмографічного сигналу,
+          обробки IR/Red каналів, розрахунку BPM і SpO2, аналізу морфології
+          PPG-хвилі, API, сховища даних, математичних формул, фізичних принципів
+          і використаних технологій.
+        </p>
+      </div>
+
+      <div class="badge-row">
+        <span class="badge">Python + FastAPI</span>
+        <span class="badge">ESP32 + MAX30102</span>
+        <span class="badge">PPG signal processing</span>
+        <span class="badge">BPM / SpO2 estimation</span>
+        <span class="badge">Waveform morphology</span>
+        <span class="badge">PostgreSQL optional persistence</span>
+      </div>
+
+      <div class="meta-grid">
+        <div>Проєкт</div>
+        <div><code>pulso_py_new</code></div>
+        <div>Робочий шлях</div>
+        <div><code>/Users/vitkarino/Desktop/pulso_py_new</code></div>
+        <div>Стан коду</div>
+        <div>Поточний локальний стан репозиторію, commit <code>6dbf7ee</code></div>
+        <div>Дата документа</div>
+        <div>27 квітня 2026 року</div>
+        <div>Мова</div>
+        <div>Українська</div>
+      </div>
+    </div>
+
+    <div class="warning">
+      <strong>Важливо.</strong>
+      Описана програма є інженерним прототипом для збору та аналізу PPG-сигналу.
+      Результати BPM, SpO2 і морфологічні ознаки хвилі залежать від калібрування,
+      посадки датчика, рухових артефактів, перфузії тканин, оптичної геометрії
+      та електронних налаштувань.
+      Документ не стверджує клінічну придатність системи без окремої валідації.
+    </div>
+  </section>
+
+  <section>
+    <h2>Зміст</h2>
+    <div class="toc">
+      <ol>
+        <li><a href="#purpose">Призначення та межі системи</a></li>
+        <li><a href="#architecture">Архітектура програми</a></li>
+        <li><a href="#technologies">Використані технології</a></li>
+        <li><a href="#data-flow">Потік даних від датчика до результату</a></li>
+        <li><a href="#api">HTTP та WebSocket API</a></li>
+        <li><a href="#storage">Збереження записів і модель даних</a></li>
+        <li><a href="#physics">Фізична основа PPG та пульсоксиметрії</a></li>
+        <li><a href="#algorithms">Алгоритми цифрової обробки сигналу</a></li>
+        <li><a href="#math">Математична модель BPM, SpO2, морфології і якості сигналу</a></li>
+        <li><a href="#firmware">Логіка прошивки ESP32</a></li>
+        <li><a href="#configuration">Конфігурація та базові значення</a></li>
+        <li><a href="#tests">Перевірка, тестування та обмеження</a></li>
+        <li><a href="#references">Перелік посилань</a></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="purpose">
+    <h2>1. Призначення та межі системи</h2>
+    <p>
+      Pulso PPG Backend приймає від ESP32 пакети фотоплетизмографічних зразків
+      з двох оптичних каналів: інфрачервоного <code>ir</code> та червоного
+      <code>r</code>. Сервер підтримує живу обробку потоку, короткі вимірювальні
+      сесії, довші записи, трансляцію сирих пакетів для інтерфейсу, збереження
+      записів у PostgreSQL та експорт даних у JSON або CSV.
+    </p>
+    <p>
+      Основні вихідні фізіологічні оцінки: частота серцевих скорочень
+      <code>bpm</code>, насичення крові киснем <code>spo2</code>, ratio-of-ratios
+      <code>ratio</code>, індекс довіри <code>sensor_confidence</code> і структурований
+      опис якості сигналу <code>signal_quality</code>. Додатково backend повертає
+      <code>waveform_morphology</code> з інженерним описом форми PPG-хвилі,
+      стабільності пульсових циклів і усередненим шаблоном хвилі. Значення можуть бути
+      <code>null</code>, якщо вікно ще коротке, контакт з пальцем не виявлений
+      або сигнал не дає надійної AC/DC оцінки.
+    </p>
+
+    <div class="note">
+      <strong>Функціональна межа:</strong> система оцінює життєві показники з
+      PPG-сигналу на рівні програмного прототипу. Вона не містить клінічного
+      калібрування під конкретну оптичну конструкцію, пацієнтську популяцію,
+      температуру, тон шкіри, рух або медичний стандарт перевірки точності.
+      Морфологічні показники описують форму хвилі та стабільність сигналу, але
+      не діагностують судинний стан або серцево-судинні патології.
+    </div>
+  </section>
+
+  <section id="architecture">
+    <h2>2. Архітектура програми</h2>
+    <p>
+      Проєкт складається з двох частин: Python-бекенду та прошивки ESP32.
+      Бекенд приймає WebSocket-повідомлення, валідує JSON, веде ковзні буфери,
+      фільтрує PPG-канали, рахує метрики та керує записами. Прошивка налаштовує
+      MAX30102/MAX3010x, підключається до Wi-Fi, відкриває WebSocket-клієнт і
+      передає батчі зразків.
+    </p>
+
+    <div class="diagram">
+      <strong>Логічна схема обробки</strong>
+      <div class="flow">
+        <div><strong>MAX30102</strong>Red/IR LED, фотодетектор, FIFO, температура.</div>
+        <div><strong>ESP32</strong>I2C-зчитування, прорідження до 25 Гц, JSON batch.</div>
+        <div><strong>WebSocket</strong><code>/ws</code> або <code>/ws/esp32</code>, hello/start/stop.</div>
+        <div><strong>Processing</strong>Буфер, Hampel, detrend, Butterworth, peaks, morphology, Welch.</div>
+        <div><strong>API/DB</strong>Метрики, записи, live chart, CSV/JSON export.</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Файл або модуль</th>
+          <th>Роль у системі</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>app/main.py</code></td>
+          <td>Створює FastAPI-додаток, REST endpoints, WebSocket endpoints, CSV/JSON експорт.</td>
+        </tr>
+        <tr>
+          <td><code>app/processing/service.py</code></td>
+          <td>Оркеструє валідацію JSON, буферизацію, фільтрацію, розрахунок метрик і записи.</td>
+        </tr>
+        <tr>
+          <td><code>app/processing/buffer.py</code></td>
+          <td>Зберігає ковзне вікно сигналу окремо для кожного пристрою.</td>
+        </tr>
+        <tr>
+          <td><code>app/processing/filters.py</code></td>
+          <td>Виконує Hampel suppression, лінійний detrend і Butterworth band-pass.</td>
+        </tr>
+        <tr>
+          <td><code>app/processing/metrics.py</code></td>
+          <td>Рахує BPM, SpO2, perfusion index, confidence, рівень якості сигналу та підключає morphology result до загальних метрик.</td>
+        </tr>
+        <tr>
+          <td><code>app/processing/morphology.py</code></td>
+          <td>Виділяє пульсові цикли IR-каналу, нормалізує форму хвилі та рахує morphology score.</td>
+        </tr>
+        <tr>
+          <td><code>app/measurement.py</code></td>
+          <td>Керує сесіями вимірювання та записами з фіксованою або відкритою тривалістю.</td>
+        </tr>
+        <tr>
+          <td><code>app/recording_repository.py</code></td>
+          <td>Описує таблиці SQLAlchemy Core і операції з PostgreSQL/сумісною БД.</td>
+        </tr>
+        <tr>
+          <td><code>app/websocket_handler.py</code></td>
+          <td>Підтримує WebSocket-з'єднання пристроїв, live subscribers і команди start/stop.</td>
+        </tr>
+        <tr>
+          <td><code>embedded/pulso_esp32/pulso_esp32.ino</code></td>
+          <td>Прошивка ESP32 для MAX30102, Wi-Fi, WebSocket та пакетної передачі PPG.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="technologies">
+    <h2>3. Використані технології</h2>
+    <h3>Backend</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Технологія</th>
+          <th>Як використовується</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Python</td>
+          <td>Основна мова серверної логіки, математичних розрахунків і тестів.</td>
+        </tr>
+        <tr>
+          <td>FastAPI</td>
+          <td>HTTP API, WebSocket маршрути, автоматична OpenAPI-сумісна структура endpoint-ів.</td>
+        </tr>
+        <tr>
+          <td>Uvicorn</td>
+          <td>ASGI-сервер для запуску FastAPI-додатку, HTTP/1.1 і WebSocket обробки.</td>
+        </tr>
+        <tr>
+          <td>Pydantic v2</td>
+          <td>Валідація вхідних JSON-пакетів, моделей пристрою, зразків і вихідних метрик.</td>
+        </tr>
+        <tr>
+          <td>NumPy</td>
+          <td>Масиви сигналу, середні, медіани, RMS, стандартне відхилення, IQR.</td>
+        </tr>
+        <tr>
+          <td>SciPy Signal</td>
+          <td>Фільтр Butterworth, detrend, zero-phase filtering, peak finding, Welch PSD.</td>
+        </tr>
+        <tr>
+          <td>SQLAlchemy Core</td>
+          <td>Опис таблиць, insert/update/select/delete, індекси, транзакції.</td>
+        </tr>
+        <tr>
+          <td>psycopg / PostgreSQL</td>
+          <td>Опційне постійне збереження користувачів, проєктів, записів і sample rows.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Embedded</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Технологія</th>
+          <th>Як використовується</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Arduino/C++ для ESP32</td>
+          <td>Цикл <code>setup()</code>/<code>loop()</code>, робота з Wi-Fi, I2C і таймерами <code>millis()</code>.</td>
+        </tr>
+        <tr>
+          <td>MAX30105 / MAX3010x library</td>
+          <td>Ініціалізація MAX30102, FIFO, Red/IR samples, temperature read.</td>
+        </tr>
+        <tr>
+          <td>ArduinoJson</td>
+          <td>Серіалізація батчів PPG у компактний JSON і розбір команд backend-а.</td>
+        </tr>
+        <tr>
+          <td>arduinoWebSockets</td>
+          <td>WebSocket client для з'єднання ESP32 із FastAPI backend-ом.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="data-flow">
+    <h2>4. Потік даних від датчика до результату</h2>
+    <h3>4.1. Формат вхідного пакета</h3>
+    <p>
+      Сервер очікує JSON, де кореневий об'єкт має поле <code>device</code>. Кожен
+      sample містить інфрачервоний канал <code>ir</code> і червоний канал
+      <code>r</code>. Частота дискретизації передається в полі <code>fs</code>.
+    </p>
+    <pre><code>{
+  "device": {
+    "id": "F4:65:0B:55:2E:80",
+    "recording_id": "optional-recording-uuid",
+    "temp": 31.75,
+    "fs": 25,
+    "samples": [
+      {"ir": 84231, "r": 53211}
+    ]
+  }
+}</code></pre>
+
+    <h3>4.2. Валідація</h3>
+    <p>
+      Pydantic-моделі <code>DevicePayload</code>, <code>DeviceData</code> і
+      <code>PPGSample</code> перевіряють, що ідентифікатор пристрою непорожній,
+      <code>fs &gt; 0</code>, фактична частота не нижча за 5 Гц, а зразки каналів
+      додатні. Поле <code>r</code> в JSON мапиться на внутрішнє поле
+      <code>red</code>.
+    </p>
+
+    <h3>4.3. Ковзне вікно</h3>
+    <p>
+      Для кожного <code>device_id</code> створюється окремий <code>DeviceSignalBuffer</code>.
+      Якщо пристрій змінює <code>fs</code>, буфер очищається, бо зразки з різними
+      частотами не можна коректно змішувати в одному часовому ряді. Максимальна
+      довжина вікна: <code>round(MAX_WINDOW_SECONDS * fs)</code>. За стандартних
+      значень це <code>20 * 25 = 500</code> samples.
+    </p>
+
+    <h3>4.4. Результат метрик</h3>
+    <p>
+      Успішно оброблений пакет повертає <code>VitalSigns</code> і оновлює
+      <code>MetricsStore</code>. Під час активного запису backend також додає
+      sample rows у сесію та може транслювати live batch через <code>/recordings/live</code>.
+      Поле <code>waveform_morphology</code> є додатковим і не змінює старі поля
+      <code>bpm</code>, <code>spo2</code>, <code>ratio</code>,
+      <code>sensor_confidence</code> або <code>signal_quality</code>.
+    </p>
+    <pre><code>{
+  "device_id": "F4:65:0B:55:2E:80",
+  "timestamp": "2026-04-27T07:42:29Z",
+  "fs": 25,
+  "temperature": 31.75,
+  "bpm": 71.4,
+  "spo2": 96.0,
+  "ratio": 0.5547,
+  "sensor_confidence": 0.969,
+  "signal_quality": {
+    "level": "high",
+    "samples_in_window": 375,
+    "window_seconds": 15.0,
+    "perfusion_index": 3.5426,
+    "peak_count": 18,
+    "shape_score": 0.973,
+    "reason": null
+  },
+  "waveform_morphology": {
+    "enabled": true,
+    "valid_pulse_count": 16,
+    "pulse_amplitude": 2979.497,
+    "pulse_duration_ms": 840.0,
+    "rise_time_ms": 440.0,
+    "decay_time_ms": 400.0,
+    "pulse_width_50_ms": 415.858,
+    "rise_slope": 6.926,
+    "decay_slope": 7.413,
+    "symmetry_ratio": 0.5238,
+    "area": 0.5001,
+    "shape_similarity": 0.999,
+    "amplitude_variability": 0.012,
+    "duration_variability": 0.019,
+    "morphology_variability": 0.001,
+    "shape_score": 0.973,
+    "shape_quality": "stable",
+    "reason": null,
+    "average_pulse_template": [0.0, 0.08, 0.22, 0.51, 0.84, 1.0, 0.76, 0.52, 0.34, 0.21, 0.0]
+  }
+}</code></pre>
+    <p>
+      У реальній відповіді <code>average_pulse_template</code> має фіксовану
+      довжину 100 точок; у прикладі масив скорочено для читабельності.
+    </p>
+  </section>
+
+  <section id="api">
+    <h2>5. HTTP та WebSocket API</h2>
+    <h3>5.1. Сервісні endpoints</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>Призначення</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>GET /health</code></td>
+          <td>Перевірка доступності сервера та поточного порту.</td>
+        </tr>
+        <tr>
+          <td><code>GET /metrics</code></td>
+          <td>Останні метрики по всіх пристроях у пам'яті процесу, включно з <code>waveform_morphology</code>.</td>
+        </tr>
+        <tr>
+          <td><code>GET /metrics/{device_id}</code></td>
+          <td>Останні метрики конкретного пристрою або 404; структура відповіді відповідає моделі <code>VitalSigns</code>.</td>
+        </tr>
+        <tr>
+          <td><code>GET /devices</code></td>
+          <td>Підключені WebSocket-пристрої та кількість live subscribers.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>5.2. Вимірювання та записи</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>Логіка</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>POST /measurements/{device_id}/start</code></td>
+          <td>Стартує коротку сесію для пристрою. За замовчуванням тривалість 15 с.</td>
+        </tr>
+        <tr>
+          <td><code>GET /measurements</code></td>
+          <td>Повертає всі активні або завершені сесії в пам'яті процесу.</td>
+        </tr>
+        <tr>
+          <td><code>GET /measurements/{device_id}</code></td>
+          <td>Стан сесії конкретного пристрою; у завершеному результаті є ті самі поля метрик, що і в <code>/metrics</code>.</td>
+        </tr>
+        <tr>
+          <td><code>POST /api/recordings/start</code></td>
+          <td>Створює запис, очищає буфер пристрою, надсилає ESP32 команду <code>start</code>.</td>
+        </tr>
+        <tr>
+          <td><code>POST /api/recordings/{id}/stop</code></td>
+          <td>Зупиняє запис у backend-і та надсилає пристрою команду <code>stop</code>.</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/recordings</code></td>
+          <td>Список записів із фільтрами <code>limit</code>, <code>offset</code>, <code>date_from</code>, <code>date_to</code>.</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/recordings/{id}/samples</code></td>
+          <td>Посторінкове читання sample rows конкретного запису.</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/recordings/{id}/extract?format=json|csv</code></td>
+          <td>Експорт одного запису з samples.</td>
+        </tr>
+        <tr>
+          <td><code>GET /api/recordings/extract?format=json|csv</code></td>
+          <td>Експорт усіх записів із фільтрацією за датою.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>5.3. WebSocket</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>Призначення</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>ws://host:8080/ws</code></td>
+          <td>Основний канал прийому PPG JSON від пристрою або клієнта.</td>
+        </tr>
+        <tr>
+          <td><code>ws://host:8080/ws/esp32</code></td>
+          <td>Еквівалентний канал для ESP32-прошивки.</td>
+        </tr>
+        <tr>
+          <td><code>ws://host:8080/recordings/live</code></td>
+          <td>Підписка UI на live-пакети зразків активного запису та поточні метрики з <code>waveform_morphology</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      ESP32 спершу надсилає <code>{"type":"hello","device_id":"..."}</code>.
+      Backend реєструє WebSocket під цим device id і відповідає
+      <code>hello_ack</code>. Коли HTTP-клієнт стартує запис, backend надсилає
+      на цей WebSocket команду <code>start</code> з <code>recording_id</code>.
+      Після локального завершення або команди stop пристрій повертає
+      <code>finished</code>, <code>start_ack</code> або <code>stop_ack</code>.
+      Live subscribers отримують пакет <code>recording_sample_batch</code>, у
+      якому <code>metrics</code> серіалізується через ту саму модель
+      <code>VitalSigns</code>; тому frontend може читати <code>shape_score</code>,
+      <code>shape_quality</code> і <code>average_pulse_template</code> без
+      окремого endpoint-а.
+    </p>
+  </section>
+
+  <section id="storage">
+    <h2>6. Збереження записів і модель даних</h2>
+    <p>
+      PostgreSQL вмикається, якщо заданий <code>DATABASE_URL</code>,
+      <code>POSTGRES_DSN</code> або компонентні змінні <code>POSTGRES_HOST</code>,
+      <code>POSTGRES_PORT</code>, <code>POSTGRES_USER</code>, <code>POSTGRES_PASSWORD</code>,
+      <code>POSTGRES_DB</code>. Без БД live-метрики й сесії працюють у пам'яті,
+      але endpoints для recordings/projects/users повертають 503.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Таблиця</th>
+          <th>Ключові поля</th>
+          <th>Призначення</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>users</code></td>
+          <td><code>id</code>, <code>name</code>, <code>age</code>, <code>sex</code>, <code>recordings_qty</code></td>
+          <td>Люди, для яких можуть створюватися записи.</td>
+        </tr>
+        <tr>
+          <td><code>projects</code></td>
+          <td><code>id</code>, <code>title</code>, <code>description</code>, <code>recordings_qty</code></td>
+          <td>Групування записів за дослідженням або проєктом.</td>
+        </tr>
+        <tr>
+          <td><code>project_users</code></td>
+          <td><code>project_id</code>, <code>user_id</code>, <code>assigned_at</code></td>
+          <td>Зв'язок many-to-many між користувачами та проєктами.</td>
+        </tr>
+        <tr>
+          <td><code>recordings</code></td>
+          <td><code>id</code>, <code>started_at</code>, <code>finished_at</code>, <code>bpm</code>, <code>spo2</code>, <code>signal_quality</code>, <code>sensor_confidence</code></td>
+          <td>Метадані запису та фінальний результат обробки.</td>
+        </tr>
+        <tr>
+          <td><code>recordings_samples</code></td>
+          <td><code>recording_id</code>, <code>sample_index</code>, <code>raw_data</code>, <code>created_at</code></td>
+          <td>Сирі IR/Red samples кожного запису.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      У <code>recordings_samples</code> є унікальне обмеження
+      <code>(recording_id, sample_index)</code>, що не дає випадково записати
+      однаковий sample index двічі. Індекси за <code>started_at</code>,
+      <code>status</code> і <code>recording_id</code> прискорюють типові запити.
+    </p>
+    <p>
+      У фінальному записі <code>signal_quality</code> зберігається як JSON і
+      містить <code>shape_score</code>, якщо morphology була доступна. Повний
+      <code>waveform_morphology</code> з шаблоном хвилі передається в live/API
+      відповіді <code>VitalSigns</code>; окремої колонки для
+      <code>average_pulse_template</code> у таблиці <code>recordings</code>
+      поточна схема не створює.
+    </p>
+  </section>
+
+  <section id="physics" class="page-break">
+    <h2>7. Фізична основа PPG та пульсоксиметрії</h2>
+    <h3>7.1. Фотоплетизмографія</h3>
+    <p>
+      Фотоплетизмографія вимірює зміну інтенсивності світла, що проходить через
+      тканину або відбивається від неї. Коли серце викидає кров, артеріальний
+      об'єм у периферичній тканині періодично змінюється; це змінює поглинання
+      та розсіювання світла. PPG-сигнал умовно складається з повільної
+      непульсуючої складової DC і малої пульсуючої складової AC, синхронної з
+      серцевим циклом [1].
+    </p>
+    <p>
+      У цій системі MAX30102 працює як reflective PPG sensor: червоний та
+      інфрачервоний світлодіоди освітлюють тканину, а фотодетектор вимірює
+      відбите світло. Сенсор також має FIFO, програмовані параметри sample rate,
+      LED current, pulse width, ADC range та внутрішній температурний сенсор [5].
+    </p>
+
+    <h3>7.2. Чому потрібні два канали</h3>
+    <p>
+      Оксигемоглобін і дезоксигемоглобін мають різні спектри поглинання в
+      червоній та інфрачервоній області. Пульсоксиметрія використовує це
+      співвідношення: зміни AC/DC на двох довжинах хвиль комбінуються у
+      ratio-of-ratios, після чого SpO2 отримують через емпіричну калібрувальну
+      функцію [2], [3].
+    </p>
+
+    <div class="formula">
+      <strong>Фізичний сенс AC/DC:</strong><br>
+      DC приблизно відповідає сталому оптичному шляху через тканини, венозну
+      кров, непульсуючу артеріальну кров і конструктивні умови датчика.<br>
+      AC відповідає зміні оптичного сигналу, викликаній серцевим пульсом.<br>
+      PI = (AC<sub>IR</sub> / DC<sub>IR</sub>) * 100%.
+    </div>
+
+    <h3>7.3. Перфузійний індекс</h3>
+    <p>
+      Perfusion index є відношенням пульсуючої частини сигналу до непульсуючої
+      частини. Він не є самостійним медичним діагнозом, але добре підходить як
+      інженерний індикатор сили PPG-сигналу та якості контакту. У програмі PI
+      використовується для contact detection, дозволу/заборони SpO2 та внеску
+      в <code>sensor_confidence</code> [4].
+    </p>
+  </section>
+
+  <section id="algorithms">
+    <h2>8. Алгоритми цифрової обробки сигналу</h2>
+    <h3>8.1. Hampel suppression для одиничних викидів</h3>
+    <p>
+      Перед фільтрацією кожен канал проходить Hampel-подібну обробку. Для
+      кожного sample у центрі локального вікна розраховується медіана та
+      robust scale через median absolute deviation. Якщо точка відхиляється
+      більше ніж на <code>3 * MAD</code>, її замінюють медіаною. Це приглушує
+      одиничні spike-и без сильного спотворення форми пульсу [7].
+    </p>
+    <div class="formula">
+      Для вікна W<sub>i</sub>:<br>
+      m<sub>i</sub> = median(W<sub>i</sub>)<br>
+      MAD<sub>i</sub> = 1.4826 * median(|x<sub>j</sub> - m<sub>i</sub>|)<br>
+      якщо |x<sub>i</sub> - m<sub>i</sub>| &gt; 3 * MAD<sub>i</sub>, тоді x<sub>i</sub> := m<sub>i</sub>.
+    </div>
+
+    <h3>8.2. Лінійний detrend</h3>
+    <p>
+      PPG має повільний baseline drift через рух, тиск пальця, дихання,
+      температуру та зміну контакту. <code>scipy.signal.detrend(..., type="linear")</code>
+      віднімає найкращу лінійну складову з поточного вікна, залишаючи
+      швидші коливання, корисні для BPM і AC-оцінки.
+    </p>
+    <div class="formula">
+      x<sub>d</sub>[n] = x<sub>clean</sub>[n] - (a n + b), де a і b оцінюються
+      як лінійний тренд на поточному вікні.
+    </div>
+
+    <h3>8.3. Butterworth band-pass</h3>
+    <p>
+      Після detrend сигнал проходить смуговий фільтр Butterworth 4-го порядку
+      зі стандартною смугою <code>0.5..3.0 Hz</code>. Верхня частота обмежується
+      <code>0.95 * Nyquist</code>, щоб не порушити цифрові умови фільтрації.
+      Звичайний режим використовує <code>sosfiltfilt</code>, тобто прямий і
+      зворотний прохід для нульової фазової затримки; якщо вікно замале,
+      код переходить на <code>sosfilt</code> [6], [9].
+    </p>
+    <div class="formula">
+      f<sub>Nyquist</sub> = f<sub>s</sub> / 2.<br>
+      Для f<sub>s</sub> = 25 Hz маємо f<sub>Nyquist</sub> = 12.5 Hz, тому смуга
+      0.5..3.0 Hz безпечна для цифрової обробки.<br>
+      3.0 Hz відповідає 180 bpm, бо bpm = 60 * f.
+    </div>
+
+    <h3>8.4. Пошук піків</h3>
+    <p>
+      Піки шукаються на відфільтрованому IR-каналі. Мінімальна відстань між
+      піками задається через максимальний дозволений пульс:
+      <code>round(fs * 60 / MAX_BPM)</code>. При <code>fs=25</code> і
+      <code>MAX_BPM=180</code> це приблизно 8 samples. Початкова prominence
+      дорівнює <code>0.35 * std(filtered_ir)</code>. Якщо піків замало, код
+      робить повторний пошук із relaxed threshold на основі MAD.
+    </p>
+
+    <h3>8.5. Аналіз морфології PPG-хвилі</h3>
+    <p>
+      Аналіз морфології PPG-сигналу розширює функціонал системи, оскільки
+      дозволяє оцінювати не лише BPM та SpO2, а й форму окремих пульсових
+      хвиль. Для цього сигнал розбивається на пульсові цикли, кожен цикл
+      нормалізується за амплітудою та тривалістю, після чого розраховуються
+      часові, амплітудні та кореляційні ознаки. Отримані показники
+      використовуються для додаткової оцінки якості сигналу, виявлення рухових
+      артефактів та передачі усередненої форми хвилі на frontend.
+    </p>
+    <p>
+      Новий модуль <code>app/processing/morphology.py</code> використовує вже
+      знайдені піки IR-каналу і не дублює фільтрацію або peak detection. Між
+      сусідніми піками шукаються локальні мінімуми, які виконують роль foot
+      points. Один пульсовий цикл визначається як ділянка від мінімуму перед
+      піком до наступного мінімуму після піка. Цикли відкидаються, якщо їхня
+      тривалість виходить за межі <code>MIN_BPM..MAX_BPM</code>, амплітуда надто
+      мала або амплітуда є очевидним outlier-ом.
+    </p>
+    <p>
+      Для кожного валідного циклу рахуються <code>pulse_amplitude</code>,
+      <code>pulse_duration_ms</code>, <code>rise_time_ms</code>,
+      <code>decay_time_ms</code>, <code>pulse_width_50_ms</code>,
+      <code>rise_slope</code>, <code>decay_slope</code>, <code>area</code> та
+      <code>symmetry_ratio</code>. Числові поля у відповіді є медіанами по
+      валідних пульсах, а не значеннями одного випадкового циклу.
+    </p>
+    <p>
+      Для порівняння форми кожен цикл ресемплюється до 100 точок і
+      нормалізується за амплітудою так, що локальний мінімум стає 0, а максимум
+      стає 1. З normalized pulses формується <code>average_pulse_template</code>.
+      Далі кожен нормалізований пульс порівнюється з шаблоном через correlation,
+      а медіанне значення кореляції стає <code>shape_similarity</code>.
+      Додатково рахуються <code>amplitude_variability</code>,
+      <code>duration_variability</code> і <code>morphology_variability</code>.
+    </p>
+    <p>
+      <code>shape_score</code> має діапазон 0..1 і комбінує similarity,
+      стабільність амплітуди, стабільність тривалості, кількість валідних
+      пульсів та варіативність rise time / pulse width. Статус
+      <code>shape_quality</code> може бути <code>stable</code>,
+      <code>moderately_stable</code>, <code>unstable</code>,
+      <code>insufficient_pulses</code>, <code>low_amplitude</code>,
+      <code>irregular_shape</code> або <code>invalid_signal</code>. Ці ознаки
+      описують waveform shape і pulse stability як інженерні характеристики
+      сигналу; вони не є клінічною діагностикою.
+    </p>
+
+    <h3>8.6. Welch fallback</h3>
+    <p>
+      Якщо часовий пошук піків не дає достатньо валідних інтервалів, система
+      переходить до спектральної оцінки через метод Welch. У діапазоні
+      <code>MIN_BPM/60 .. MAX_BPM/60</code> вибирається частота з найбільшою
+      потужністю, але тільки якщо пік щонайменше втричі перевищує median noise
+      floor. Додаткова перевірка не дає алгоритму зафіксуватися на другій
+      гармоніці, якщо біля <code>f/2</code> є порівнянний пік [8], [9].
+    </p>
+  </section>
+
+  <section id="math">
+    <h2>9. Математична модель BPM, SpO2, морфології і якості сигналу</h2>
+    <h3>9.1. Мінімальне вікно</h3>
+    <p>
+      Якщо довжина вікна менша за <code>MIN_WINDOW_SECONDS</code>, система
+      не видає BPM і SpO2. За стандартних значень потрібно мінімум 8 секунд.
+      Confidence у цьому стані масштабується лише до 0.2, а
+      <code>signal_quality.level</code> дорівнює <code>warming_up</code>.
+      <code>waveform_morphology</code> може бути присутнім у відповіді, але при
+      недостатній кількості валідних пульсів <code>shape_score</code> дорівнює
+      <code>null</code> і не впливає на confidence.
+    </p>
+    <div class="formula">
+      window_seconds = N / f<sub>s</sub><br>
+      якщо window_seconds &lt; MIN_WINDOW_SECONDS, тоді confidence =
+      clamp(window_seconds / MIN_WINDOW_SECONDS * 0.2).
+    </div>
+
+    <h3>9.2. BPM з міжпікових інтервалів</h3>
+    <p>
+      Якщо знайдено достатньо піків, оцінка BPM базується на медіані валідних
+      inter-beat intervals. Інтервали фільтруються за межами пульсу
+      <code>MIN_BPM..MAX_BPM</code>, а потім очищаються від outlier-ів через
+      IQR-правило.
+    </p>
+    <div class="formula">
+      IBI<sub>k</sub> = (peak<sub>k+1</sub> - peak<sub>k</sub>) / f<sub>s</sub><br>
+      valid IBI: 60 / MAX_BPM &lt;= IBI<sub>k</sub> &lt;= 60 / MIN_BPM<br>
+      BPM = 60 / median(valid IBI)
+    </div>
+    <p>
+      Регулярність ритму оцінюється через coefficient of variation:
+    </p>
+    <div class="formula">
+      CV = std(IBI) / mean(IBI)<br>
+      regularity_score = clamp(1 - CV / 0.18)
+    </div>
+
+    <h3>9.3. AC/DC для SpO2</h3>
+    <p>
+      DC-компоненти беруться як середні значення сирих каналів. AC-компоненти
+      оцінюються за медіанною амплітудою між піком і мінімумом наступного
+      сегмента. Якщо піків недостатньо, використовується RMS fallback:
+      <code>2 * sqrt(2) * RMS(filtered)</code>. Для синусоїдального сигналу це
+      наближує peak-to-peak amplitude; у ratio-of-ratios однаковий множник у
+      двох каналах скорочується.
+    </p>
+    <div class="formula">
+      DC<sub>IR</sub> = mean(raw_ir), DC<sub>Red</sub> = mean(raw_red)<br>
+      R = (AC<sub>Red</sub> / DC<sub>Red</sub>) / (AC<sub>IR</sub> / DC<sub>IR</sub>)<br>
+      PI = (AC<sub>IR</sub> / DC<sub>IR</sub>) * 100
+    </div>
+
+    <h3>9.4. Калібрувальна формула SpO2</h3>
+    <p>
+      У поточному коді SpO2 рахується квадратичною емпіричною формулою з
+      коефіцієнтами з конфігурації. Це типова інженерна форма для двохвильової
+      pulse oximetry, але її потрібно калібрувати під конкретний датчик,
+      LED current, геометрію корпуса, місце вимірювання та референсний
+      пульсоксиметр [2], [3].
+    </p>
+    <div class="formula">
+      SpO2 = clamp(0, 100, A R<sup>2</sup> + B R + C + offset)<br>
+      Стандартно: A = -45.060, B = 30.354, C = 94.845, offset = -1.8.
+    </div>
+
+    <h3>9.5. Контакт і якість сигналу</h3>
+    <p>
+      Contact detection захищає від вимірювань без пальця, із засвіченим або
+      насиченим сенсором. Якщо DC нижчий за мінімум, канал насичений або PI
+      за межами очікуваного діапазону, система повертає <code>no_contact</code>,
+      <code>bpm=null</code>, <code>spo2=null</code> і <code>sensor_confidence=0</code>.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Порогове значення</th>
+          <th>Стандарт</th>
+          <th>Сенс</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>MIN_IR_DC</code></td>
+          <td>50000</td>
+          <td>IR DC занизький: немає достатнього оптичного контакту.</td>
+        </tr>
+        <tr>
+          <td><code>MIN_RED_DC</code></td>
+          <td>10000</td>
+          <td>Red DC занизький.</td>
+        </tr>
+        <tr>
+          <td><code>MAX_SENSOR_DC</code></td>
+          <td>250000</td>
+          <td>Канал імовірно насичений.</td>
+        </tr>
+        <tr>
+          <td><code>MIN_PERFUSION_INDEX</code></td>
+          <td>0.05%</td>
+          <td>Мінімум для виявлення контакту.</td>
+        </tr>
+        <tr>
+          <td><code>MIN_SPO2_PERFUSION_INDEX</code></td>
+          <td>0.05%</td>
+          <td>Мінімум для публікації SpO2.</td>
+        </tr>
+        <tr>
+          <td><code>MAX_PERFUSION_INDEX</code></td>
+          <td>20%</td>
+          <td>Надто великий PI: нестабільний або засвічений сигнал.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>9.6. Shape score для морфології</h3>
+    <p>
+      Морфологічний score є окремою евристичною оцінкою стабільності форми
+      хвилі. Він розраховується тільки тоді, коли з IR-каналу можна виділити
+      щонайменше три валідні пульсові цикли. Якщо циклів замало, сигнал
+      невалідний або амплітуда занизька, <code>shape_quality</code> пояснює
+      причину, а <code>shape_score</code> залишається <code>null</code> або
+      дорівнює 0 для непридатної амплітуди.
+    </p>
+    <div class="formula">
+      pulse<sub>i,norm</sub> = resample((pulse<sub>i</sub> - min) / (max - min), 100)<br>
+      template = mean(pulse<sub>i,norm</sub>)<br>
+      shape_similarity = median(corr(pulse<sub>i,norm</sub>, template))<br>
+      amplitude_variability = std(amplitude) / mean(amplitude)<br>
+      duration_variability = std(duration) / mean(duration)
+    </div>
+    <p>
+      Фінальний <code>shape_score</code> комбінує <code>shape_similarity</code>,
+      стабільність амплітуди, стабільність тривалості, кількість валідних
+      пульсів і стабільність додаткових часових ознак. Інтерпретація статусів:
+      <code>0.8..1.0</code> — <code>stable</code>, <code>0.5..0.8</code> —
+      <code>moderately_stable</code>, <code>0.2..0.5</code> —
+      <code>unstable</code>, нижче <code>0.2</code> — непридатна або нерегулярна
+      форма. Це службова оцінка waveform shape, а не медична класифікація.
+    </p>
+
+    <h3>9.7. Sensor confidence</h3>
+    <p>
+      Confidence є евристичним score від 0 до 1. Він не є статистичною
+      ймовірністю. Формула комбінує тривалість вікна, perfusion index,
+      регулярність інтервалів, кількість піків, правдоподібність ratio і,
+      коли доступний, score стабільності форми PPG-хвилі.
+    </p>
+    <div class="formula">
+      base_confidence = 0.20 * window_score + 0.25 * pi_score +
+      0.30 * regularity_score + 0.15 * peak_score + 0.10 * ratio_score<br>
+      якщо BPM відсутній: base_confidence := base_confidence * 0.45<br>
+      якщо SpO2 відсутній: base_confidence := base_confidence * 0.70<br>
+      якщо shape_score доступний: confidence = 0.85 * base_confidence + 0.15 * shape_score<br>
+      інакше: confidence = base_confidence
+    </div>
+    <p>
+      Рівень <code>signal_quality.level</code> стає <code>high</code>, якщо є BPM
+      і SpO2, confidence не нижче 0.7, PI достатній і знайдено щонайменше 6 піків.
+      Інакше система повертає <code>medium</code> або <code>low</code>.
+      Якщо morphology недоступна через коротке вікно або малу кількість пульсів,
+      <code>shape_score</code> залишається <code>null</code> і не штрафує
+      <code>sensor_confidence</code> у стані warming up.
+    </p>
+  </section>
+
+  <section id="firmware" class="page-break">
+    <h2>10. Логіка прошивки ESP32</h2>
+    <h3>10.1. Налаштування сенсора</h3>
+    <p>
+      Прошивка використовує MAX30105-compatible API для сенсора MAX30102.
+      Поточні параметри: LED brightness <code>0x1F</code>, sample average
+      <code>4</code>, режим двох LED <code>2</code>, hardware sample rate
+      <code>100 Hz</code>, reported sample rate <code>25 Hz</code>, pulse width
+      <code>411 us</code>, ADC range <code>4096</code>.
+    </p>
+    <p>
+      Сенсор генерує FIFO-зразки швидше, ніж backend отримує дані. ESP32
+      вичитує FIFO, але додає у batch лише ті samples, які відповідають
+      програмному інтервалу <code>1000 / 25 = 40 ms</code>. Це дає backend-у
+      стабільну заявлену частоту 25 Гц.
+    </p>
+
+    <h3>10.2. WebSocket lifecycle</h3>
+    <ol>
+      <li><code>setup()</code> ініціалізує Serial, MAX30102, Wi-Fi та WebSocket.</li>
+      <li>Після <code>WStype_CONNECTED</code> пристрій надсилає <code>hello</code>.</li>
+      <li>Backend реєструє device id і може пізніше надіслати <code>start</code>.</li>
+      <li>Команда <code>start</code> задає <code>activeRecordingId</code>, тривалість і очищає FIFO.</li>
+      <li>Під час streaming ESP32 накопичує 25 samples і відправляє batch JSON.</li>
+      <li>Коли локальний wall-clock duration завершився, ESP32 відправляє останній batch і <code>finished</code>.</li>
+      <li>Команда <code>stop</code> примусово відправляє поточний batch, повертає <code>stop_ack</code> і чистить стан.</li>
+    </ol>
+
+    <h3>10.3. Пакетування</h3>
+    <p>
+      <code>batchSize=25</code> означає приблизно один JSON-пакет на секунду при
+      25 Гц. Це зменшує overhead WebSocket-повідомлень і водночас залишає
+      backend-у достатньо часте оновлення live-графіків.
+    </p>
+    <pre><code>{
+  "device": {
+    "id": "F4:65:0B:55:2E:80",
+    "recording_id": "uuid",
+    "fs": 25,
+    "temp": 25.6,
+    "samples": [
+      {"ir": 133000, "r": 99300}
+    ]
+  }
+}</code></pre>
+
+    <h3>10.4. Відновлення після збоїв</h3>
+    <p>
+      Якщо Wi-Fi втрачено, прошивка зупиняє streaming без очищення
+      <code>activeRecordingId</code> і пробує перепідключитися кожні 5 секунд.
+      WebSocket має heartbeat <code>15 s / 3 s / 2 retries</code>. Якщо
+      WebSocket-відправка не вдалася, streaming також зупиняється, щоб не
+      накопичувати неконсистентний стан.
+    </p>
+  </section>
+
+  <section id="configuration">
+    <h2>11. Конфігурація та базові значення</h2>
+    <p>
+      Конфігурація backend-а читається з environment variables, а файл
+      <code>.env</code> підвантажується простим локальним парсером до створення
+      <code>AppConfig</code>. Якщо змінної немає, використовується стандартне
+      значення з <code>app/config.py</code>.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Параметр</th>
+          <th>Стандарт</th>
+          <th>Вплив</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>MIN_BPM</code> / <code>MAX_BPM</code></td>
+          <td>40 / 180</td>
+          <td>Фізіологічні межі BPM для peak intervals, Welch band і тривалості pulse segments у morphology.</td>
+        </tr>
+        <tr>
+          <td><code>BANDPASS_LOW_HZ</code> / <code>BANDPASS_HIGH_HZ</code></td>
+          <td>0.5 / 3.0</td>
+          <td>Смуга фільтра PPG для виділення серцевої компоненти.</td>
+        </tr>
+        <tr>
+          <td><code>FILTER_ORDER</code></td>
+          <td>4</td>
+          <td>Порядок Butterworth-фільтра.</td>
+        </tr>
+        <tr>
+          <td><code>MIN_WINDOW_SECONDS</code></td>
+          <td>8.0</td>
+          <td>Мінімальна довжина сигналу перед видачею повних метрик.</td>
+        </tr>
+        <tr>
+          <td><code>MAX_WINDOW_SECONDS</code></td>
+          <td>20.0</td>
+          <td>Максимальна довжина ковзного live-вікна.</td>
+        </tr>
+        <tr>
+          <td><code>MEASUREMENT_DURATION_SECONDS</code></td>
+          <td>15.0</td>
+          <td>Тривалість короткої сесії за замовчуванням.</td>
+        </tr>
+        <tr>
+          <td><code>MIN_PEAKS</code></td>
+          <td>4</td>
+          <td>Мінімальна кількість піків для часової BPM-оцінки; morphology додатково потребує щонайменше 3 валідні pulse segments.</td>
+        </tr>
+        <tr>
+          <td><code>SPO2_A/B/C/OFFSET</code></td>
+          <td>-45.060 / 30.354 / 94.845 / -1.8</td>
+          <td>Емпірична квадратична калібровка SpO2.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Запуск сервера:
+    </p>
+    <pre><code>python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080</code></pre>
+  </section>
+
+  <section id="tests">
+    <h2>12. Перевірка, тестування та обмеження</h2>
+    <h3>12.1. Автоматичні тести</h3>
+    <p>
+      У <code>tests/test_processing.py</code> створюється синтетичний PPG-сигнал:
+      синусоїда з заданим BPM, DC-рівнями, AC-амплітудами, ratio і шумом.
+      Тести перевіряють основний сценарій, warming-up, no-contact, низький PI
+      для SpO2, завершення measurement session, matching recording id, live payload
+      і наявність <code>waveform_morphology</code> у live metrics.
+      У <code>tests/test_morphology.py</code> окремо перевіряються чисті регулярні
+      пульси, шум із збереженою формою, спотворені пульсові форми, недостатня
+      кількість піків, надто низька амплітуда, різні тривалості циклів і
+      фіксована довжина <code>average_pulse_template</code>, а також безпечна
+      обробка NaN як <code>invalid_signal</code>.
+    </p>
+    <p>
+      Під час підготовки документа виконано:
+    </p>
+    <pre><code>python3 -m unittest discover tests</code></pre>
+    <p>
+      Результат: <span class="status-ok">17 tests, OK</span>. Для синтетичного
+      15-секундного сигналу тестовий прогін отримав приблизно
+      <code>71.4 BPM</code>, <code>SpO2 96.0%</code>, <code>ratio 0.5547</code>,
+      <code>sensor_confidence 0.970</code> і <code>shape_score 0.973</code>.
+    </p>
+
+    <h3>12.2. Інженерні обмеження</h3>
+    <ul>
+      <li>SpO2 є оцінкою, а не клінічно валідованим значенням; коефіцієнти треба калібрувати на референсних даних.</li>
+      <li>Морфологічні ознаки описують форму PPG-хвилі та стабільність сигналу, але не є діагнозом або клінічною оцінкою стану судин.</li>
+      <li>Алгоритм не має акселерометра або adaptive motion artifact cancellation, тому рух може створювати хибні піки.</li>
+      <li>Morphology analysis залежить від коректного пошуку піків; якщо motion artifact зміщує піки або foot points, форма циклу може бути оцінена неправильно.</li>
+      <li>Двохвильова модель не відрізняє карбоксигемоглобін, метгемоглобін та інші нестандартні оптичні стани крові.</li>
+      <li>Вплив тону шкіри, температури, вазоконстрикції та низької перфузії не компенсується окремою моделлю.</li>
+      <li>WebSocket/REST endpoints у поточному коді не мають автентифікації й авторизації.</li>
+      <li>При перезапуску процесу in-memory <code>MetricsStore</code> і активні сесії втрачаються; записи зберігаються тільки якщо налаштована БД.</li>
+      <li>CSV-експорт розгортає recording-level fields на кожен sample row; це зручно для аналізу, але дублює метадані.</li>
+      <li>Повний <code>average_pulse_template</code> передається у live/API відповіді, але не виділений окремою колонкою у persistence-схемі.</li>
+    </ul>
+
+    <h3>12.3. Рекомендації для подальшої валідації</h3>
+    <ul>
+      <li>Зібрати парні вимірювання з сертифікованим пульсоксиметром і підігнати <code>SPO2_A/B/C/OFFSET</code>.</li>
+      <li>Додати motion quality score або акселерометричний канал для відкидання рухових артефактів.</li>
+      <li>Перевірити пороги <code>shape_score</code> на реальних записах із рухом, слабким контактом і різною перфузією.</li>
+      <li>Логувати firmware version, LED current, contact pressure proxy і умови вимірювання разом із записом.</li>
+      <li>Додати інтеграційні тести для WebSocket команд start/stop і PostgreSQL persistence.</li>
+      <li>Ввести автентифікацію для API, якщо система використовується поза локальною лабораторною мережею.</li>
+    </ul>
+  </section>
+
+  <section id="references" class="page-break">
+    <h2>13. Перелік посилань</h2>
+    <ol class="ref-list">
+      <li>
+        Allen J. <em>Photoplethysmography and its application in clinical physiological measurement</em>.
+        Physiological Measurement, 28(3), R1-R39, 2007.
+        <a href="https://doi.org/10.1088/0967-3334/28/3/R01">https://doi.org/10.1088/0967-3334/28/3/R01</a>
+      </li>
+      <li>
+        Jubran A. <em>Pulse oximetry</em>. Critical Care, 19, Article 272, 2015.
+        <a href="https://doi.org/10.1186/s13054-015-0984-8">https://doi.org/10.1186/s13054-015-0984-8</a>
+      </li>
+      <li>
+        Mendelson Y. <em>Pulse Oximetry: Theory and Applications for Noninvasive Monitoring</em>.
+        Clinical Chemistry, 38(9), 1601-1607, 1992.
+        <a href="https://doi.org/10.1093/clinchem/38.9.1601">https://doi.org/10.1093/clinchem/38.9.1601</a>
+      </li>
+      <li>
+        Coutrot M., Dudoignon E., Joachim J., Gayat E., Vallee F., Depret F.
+        <em>Perfusion index: Physical principles, physiological meanings and clinical implications in anaesthesia and critical care</em>.
+        Anaesthesia Critical Care &amp; Pain Medicine, 40(6), 100964, 2021.
+        <a href="https://doi.org/10.1016/j.accpm.2021.100964">https://doi.org/10.1016/j.accpm.2021.100964</a>
+      </li>
+      <li>
+        Analog Devices / Maxim Integrated. <em>MAX30102 High-Sensitivity Pulse Oximeter and Heart-Rate Sensor for Wearable Health</em>.
+        <a href="https://www.analog.com/en/products/max30102.html">https://www.analog.com/en/products/max30102.html</a>
+      </li>
+      <li>
+        Butterworth S. <em>On the Theory of Filter Amplifiers</em>. Experimental Wireless and the Wireless Engineer, 7, 536-541, 1930.
+        <a href="https://cir.nii.ac.jp/crid/1572261550684507392">https://cir.nii.ac.jp/crid/1572261550684507392</a>
+      </li>
+      <li>
+        Hampel F. R. <em>The Influence Curve and its Role in Robust Estimation</em>.
+        Journal of the American Statistical Association, 69(346), 383-393, 1974.
+        <a href="https://doi.org/10.1080/01621459.1974.10482962">https://doi.org/10.1080/01621459.1974.10482962</a>
+      </li>
+      <li>
+        Welch P. D. <em>The Use of Fast Fourier Transform for the Estimation of Power Spectra: A Method Based on Time Averaging Over Short, Modified Periodograms</em>.
+        IEEE Transactions on Audio and Electroacoustics, 15(2), 70-73, 1967.
+        <a href="https://doi.org/10.1109/TAU.1967.1161901">https://doi.org/10.1109/TAU.1967.1161901</a>
+      </li>
+      <li>
+        SciPy Documentation. <em>Signal processing (scipy.signal)</em>.
+        <a href="https://docs.scipy.org/doc/scipy/reference/signal.html">https://docs.scipy.org/doc/scipy/reference/signal.html</a>
+      </li>
+      <li>
+        NumPy Documentation. <em>ndarray</em>.
+        <a href="https://numpy.org/devdocs/reference/generated/numpy.ndarray.html">https://numpy.org/devdocs/reference/generated/numpy.ndarray.html</a>
+      </li>
+      <li>
+        FastAPI Documentation.
+        <a href="https://fastapi.tiangolo.com/">https://fastapi.tiangolo.com/</a>
+      </li>
+      <li>
+        Uvicorn Documentation.
+        <a href="https://www.uvicorn.org/">https://www.uvicorn.org/</a>
+      </li>
+      <li>
+        Pydantic Documentation. <em>Models</em>.
+        <a href="https://docs.pydantic.dev/latest/concepts/models/">https://docs.pydantic.dev/latest/concepts/models/</a>
+      </li>
+      <li>
+        SQLAlchemy 2.0 Documentation.
+        <a href="https://docs.sqlalchemy.org/en/20/">https://docs.sqlalchemy.org/en/20/</a>
+      </li>
+      <li>
+        SparkFun. <em>SparkFun MAX3010x Sensor Library</em>.
+        <a href="https://github.com/sparkfun/SparkFun_MAX3010x_Sensor_Library">https://github.com/sparkfun/SparkFun_MAX3010x_Sensor_Library</a>
+      </li>
+      <li>
+        ArduinoJson Documentation. <em>serializeJson() and deserializeJson()</em>.
+        <a href="https://arduinojson.org/v6/api/json/serializejson/">https://arduinojson.org/v6/api/json/serializejson/</a>,
+        <a href="https://arduinojson.org/v6/api/json/deserializejson/">https://arduinojson.org/v6/api/json/deserializejson/</a>
+      </li>
+      <li>
+        Markus Sattler. <em>arduinoWebSockets</em>.
+        <a href="https://github.com/Links2004/arduinoWebSockets">https://github.com/Links2004/arduinoWebSockets</a>
+      </li>
+    </ol>
+  </section>
+</body>
+</html>

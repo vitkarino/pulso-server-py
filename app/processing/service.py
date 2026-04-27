@@ -68,6 +68,7 @@ class PPGProcessingService:
             ratio=result.ratio,
             sensor_confidence=result.sensor_confidence,
             signal_quality=result.quality,
+            waveform_morphology=result.waveform_morphology,
         )
         self._store.update(metrics)
         if self._config.print_live_metrics:
@@ -105,6 +106,7 @@ class PPGProcessingService:
             ratio=result.ratio,
             sensor_confidence=result.sensor_confidence,
             signal_quality=result.quality,
+            waveform_morphology=result.waveform_morphology,
         )
         self._store.update(metrics)
         if self._config.print_live_metrics:

@@ -84,6 +84,10 @@ class ProcessingTests(unittest.TestCase):
         self.assertGreaterEqual(metrics.sensor_confidence, 0.7)
         self.assertLessEqual(metrics.sensor_confidence, 1.0)
         self.assertIn(metrics.signal_quality.level, {"medium", "high"})
+        self.assertIsNotNone(metrics.waveform_morphology)
+        assert metrics.waveform_morphology is not None
+        self.assertEqual(metrics.waveform_morphology.shape_quality, "stable")
+        self.assertIsNotNone(metrics.waveform_morphology.shape_score)
 
     def test_processing_warms_up_before_minimum_window(self) -> None:
         service = PPGProcessingService(AppConfig(), MetricsStore())
@@ -194,6 +198,7 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(live_payload["sample_count"], 25)
         self.assertEqual(len(live_payload["samples"]), 25)
         self.assertEqual(live_payload["metrics"]["device_id"], "A0:B7:65:12:34:56")
+        self.assertIn("waveform_morphology", live_payload["metrics"])
 
 
 if __name__ == "__main__":

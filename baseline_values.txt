@@ -11,6 +11,7 @@ reported_sample_rate_hz=25
 pulse_width_us=411
 adc_range=4096
 batch_size=25
+reported_sample_interval_ms=40
 temperature_read_interval_ms=5000
 wifi_reconnect_interval_ms=5000
 
@@ -48,6 +49,8 @@ reference_bpm_approx=71
 
 Notes
 - The embedded sensor is configured as 100 Hz hardware sample rate with sampleAverage=4.
+- ESP32 drains the sensor FIFO but forwards samples at max 25 Hz using millis() gating.
+- Local duration completion is wall-clock based, not sample-count based.
 - Backend calculations use reported fs=25 Hz, not wall-clock delivery timing.
 - SpO2 offset -1.8 was calibrated against the observed 98% reference.
 - A clean 10 second run should collect 250 samples.

@@ -231,6 +231,7 @@ class MeasurementSession:
             ratio=result.ratio,
             sensor_confidence=result.sensor_confidence,
             signal_quality=result.quality,
+            waveform_morphology=result.waveform_morphology,
         )
         return self.result
 
