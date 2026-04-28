@@ -13,7 +13,11 @@ class PPGSample(BaseModel):
 
 class DeviceData(BaseModel):
     id: str = Field(min_length=1)
-    recording_id: str | None = Field(default=None, min_length=1)
+    recording_id: str | None = Field(
+        default=None,
+        min_length=1,
+        validation_alias="measurement_id",
+    )
     temp: float | None = None
     fs: float = Field(gt=0)
     samples: list[PPGSample] = Field(min_length=1)
@@ -71,23 +75,7 @@ class MeasurementState(BaseModel):
     reason: str | None = None
 
 
-class UserCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    age: int | None = Field(default=None, ge=0, le=150)
-    sex: str | None = Field(default=None, max_length=32)
-
-
-class UserUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    age: int | None = Field(default=None, ge=0, le=150)
-    sex: str | None = Field(default=None, max_length=32)
-
-
-class ProjectCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
-    description: str | None = None
-
-
-class ProjectUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=255)
-    description: str | None = None
+class MeasurementStartRequest(BaseModel):
+    duration_s: float | None = Field(default=None, gt=0)
+    user_id: str | None = Field(default=None, min_length=1)
+    project_id: str | None = Field(default=None, min_length=1)

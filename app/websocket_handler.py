@@ -14,21 +14,17 @@ class WebSocketController:
         self._service = service
         self._lock = RLock()
         self._connections: dict[str, WebSocket] = {}
-        self._live_subscribers: set[WebSocket] = set()
+        self._measurement_subscribers: dict[str, set[WebSocket]] = {}
 
     def connected_devices(self) -> list[str]:
         with self._lock:
             return sorted(self._connections)
 
-    def live_subscriber_count(self) -> int:
-        with self._lock:
-            return len(self._live_subscribers)
-
     async def send_start(
         self,
         *,
         device_id: str,
-        recording_id: str,
+        measurement_id: str,
         duration_seconds: float | None,
     ) -> bool:
         websocket = self._connection_for(device_id)
@@ -37,7 +33,7 @@ class WebSocketController:
 
         payload: dict[str, Any] = {
             "type": "start",
-            "recording_id": recording_id,
+            "measurement_id": measurement_id,
         }
         if duration_seconds is not None:
             payload["duration"] = duration_seconds
@@ -61,9 +57,14 @@ class WebSocketController:
             return False
         return True
 
-    async def handle(self, websocket: WebSocket) -> None:
+    async def handle_device(self, websocket: WebSocket, device_id: str) -> None:
         await websocket.accept()
-        device_id: str | None = None
+        with self._lock:
+            self._connections[device_id] = websocket
+        await websocket.send_json({"ok": True, "type": "hello_ack", "device_id": device_id})
+        await self._run_device_loop(websocket, device_id=device_id)
+
+    async def _run_device_loop(self, websocket: WebSocket, device_id: str | None) -> None:
         try:
             while True:
                 message = await websocket.receive_text()
@@ -97,18 +98,25 @@ class WebSocketController:
                 self._unregister(device_id, websocket)
             return
 
-    async def handle_live(self, websocket: WebSocket) -> None:
+    async def handle_measurement_stream(self, websocket: WebSocket, measurement_id: str) -> None:
         await websocket.accept()
         with self._lock:
-            self._live_subscribers.add(websocket)
+            subscribers = self._measurement_subscribers.setdefault(measurement_id, set())
+            subscribers.add(websocket)
         try:
-            await websocket.send_json({"type": "live_ack", "ok": True})
+            await websocket.send_json(
+                {
+                    "type": "live_ack",
+                    "ok": True,
+                    "measurement_id": measurement_id,
+                }
+            )
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
-            self._unregister_live(websocket)
+            self._unregister_measurement_stream(websocket)
         except RuntimeError:
-            self._unregister_live(websocket)
+            self._unregister_measurement_stream(websocket)
 
     def _handle_hello(self, websocket: WebSocket, message: str) -> str | None:
         try:
@@ -141,9 +149,9 @@ class WebSocketController:
         if message_type != "finished":
             return False
 
-        recording_id = payload.get("recording_id")
-        if isinstance(recording_id, str) and recording_id:
-            self._service.stop_recording(recording_id)
+        measurement_id = payload.get("measurement_id")
+        if isinstance(measurement_id, str) and measurement_id:
+            self._service.stop_recording(measurement_id)
         elif device_id is not None:
             self._service.stop_recording_for_device(device_id)
         return True
@@ -163,7 +171,13 @@ class WebSocketController:
             return
 
         with self._lock:
-            subscribers = list(self._live_subscribers)
+            measurement_id = payload.get("measurement_id")
+            measurement_subscribers = (
+                self._measurement_subscribers.get(measurement_id, set())
+                if isinstance(measurement_id, str)
+                else set()
+            )
+            subscribers = list(measurement_subscribers)
 
         stale: list[WebSocket] = []
         for subscriber in subscribers:
@@ -173,7 +187,7 @@ class WebSocketController:
                 stale.append(subscriber)
 
         for subscriber in stale:
-            self._unregister_live(subscriber)
+            self._unregister_measurement_stream(subscriber)
 
     @staticmethod
     def _live_sample_payload(message: str | bytes, metrics: object) -> dict[str, Any] | None:
@@ -188,8 +202,8 @@ class WebSocketController:
         if not isinstance(device, dict):
             return None
 
-        recording_id = device.get("recording_id")
-        if not isinstance(recording_id, str) or not recording_id:
+        measurement_id = device.get("measurement_id")
+        if not isinstance(measurement_id, str) or not measurement_id:
             return None
 
         samples = device.get("samples")
@@ -197,8 +211,8 @@ class WebSocketController:
             return None
 
         return {
-            "type": "recording_sample_batch",
-            "recording_id": recording_id,
+            "type": "measurement_sample_batch",
+            "measurement_id": measurement_id,
             "device_id": device.get("id"),
             "fs": device.get("fs"),
             "temperature": device.get("temp"),
@@ -207,6 +221,12 @@ class WebSocketController:
             "metrics": metrics.model_dump(mode="json"),
         }
 
-    def _unregister_live(self, websocket: WebSocket) -> None:
+    def _unregister_measurement_stream(self, websocket: WebSocket) -> None:
         with self._lock:
-            self._live_subscribers.discard(websocket)
+            empty_measurements: list[str] = []
+            for measurement_id, subscribers in self._measurement_subscribers.items():
+                subscribers.discard(websocket)
+                if not subscribers:
+                    empty_measurements.append(measurement_id)
+            for measurement_id in empty_measurements:
+                del self._measurement_subscribers[measurement_id]

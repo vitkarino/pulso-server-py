@@ -145,8 +145,29 @@ class RecordingRepository:
         with engine.begin() as connection:
             self._refresh_recording_counts(connection)
 
-    def list_users(self) -> list[dict[str, Any]]:
+    def list_users(
+        self,
+        *,
+        project_id: int | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
         statement = select(users_table).order_by(desc(users_table.c.created_at))
+        if project_id is not None:
+            statement = (
+                select(users_table, project_users_table.c.assigned_at)
+                .select_from(
+                    project_users_table.join(
+                        users_table,
+                        project_users_table.c.user_id == users_table.c.id,
+                    )
+                )
+                .where(project_users_table.c.project_id == project_id)
+                .order_by(desc(project_users_table.c.assigned_at))
+            )
+        statement = statement.offset(offset)
+        if limit is not None:
+            statement = statement.limit(limit)
         with self._require_engine().connect() as connection:
             rows = connection.execute(statement).mappings().all()
         return [dict(row) for row in rows]
@@ -191,8 +212,15 @@ class RecordingRepository:
             result = connection.execute(delete(users_table).where(users_table.c.id == user_id))
         return result.rowcount > 0
 
-    def list_projects(self) -> list[dict[str, Any]]:
-        statement = select(projects_table).order_by(desc(projects_table.c.created_at))
+    def list_projects(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        statement = select(projects_table).order_by(desc(projects_table.c.created_at)).offset(offset)
+        if limit is not None:
+            statement = statement.limit(limit)
         with self._require_engine().connect() as connection:
             rows = connection.execute(statement).mappings().all()
         return [dict(row) for row in rows]
@@ -316,12 +344,24 @@ class RecordingRepository:
         offset: int,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        device_id: str | None = None,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        status: str | None = None,
     ) -> list[dict[str, Any]]:
         statement = select(recordings_table)
         if date_from is not None:
             statement = statement.where(recordings_table.c.started_at >= date_from)
         if date_to is not None:
             statement = statement.where(recordings_table.c.started_at <= date_to)
+        if device_id is not None:
+            statement = statement.where(recordings_table.c.device_id == device_id)
+        if user_id is not None:
+            statement = statement.where(recordings_table.c.user_id == user_id)
+        if project_id is not None:
+            statement = statement.where(recordings_table.c.project_id == project_id)
+        if status is not None:
+            statement = statement.where(recordings_table.c.status == status)
         statement = statement.order_by(desc(recordings_table.c.started_at)).offset(offset)
         if limit is not None:
             statement = statement.limit(limit)

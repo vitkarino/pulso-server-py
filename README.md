@@ -19,22 +19,21 @@ On startup the app creates the `users`, `projects`, `project_users`, `recordings
 WebSocket input:
 
 ```text
-ws://localhost:8080/ws
-ws://localhost:8080/ws/esp32
+ws://localhost:8080/ws/devices/{device_id}
 ```
 
 Live signal broadcast for UI charts:
 
 ```text
-ws://localhost:8080/recordings/live
+ws://localhost:8080/ws/measurements/{measurement_id}/stream
 ```
 
-During an active recording, `/recordings/live` broadcasts each processed device batch:
+During an active measurement, `/ws/measurements/{measurement_id}/stream` broadcasts each processed device batch:
 
 ```json
 {
-  "type": "recording_sample_batch",
-  "recording_id": "recording uuid",
+  "type": "measurement_sample_batch",
+  "measurement_id": "measurement uuid",
   "device_id": "F4:65:0B:55:2E:80",
   "fs": 25,
   "temperature": 25.6,
@@ -55,33 +54,30 @@ During an active recording, `/recordings/live` broadcasts each processed device 
 Latest metrics:
 
 ```text
-GET http://localhost:8080/metrics
-GET http://localhost:8080/metrics/{device_id}
+GET http://localhost:8080/api/devices
+GET http://localhost:8080/api/devices/{device_id}/metrics
 ```
 
 Start a fixed-time measurement:
 
 ```text
-POST http://localhost:8080/measurements/{device_id}/start
-POST http://localhost:8080/measurements/{device_id}/start?duration_seconds=15
-GET http://localhost:8080/measurements/{device_id}
-GET http://localhost:8080/measurements
+POST http://localhost:8080/api/devices/{device_id}/measurements
+POST http://localhost:8080/api/measurements/{id}/stop
+GET  http://localhost:8080/api/measurements/{id}
+GET  http://localhost:8080/api/measurements?limit=100&offset=0&date_from=2026-04-01&date_to=2026-04-26
+GET  http://localhost:8080/api/measurements/{id}/samples?limit=1000&offset=0
+GET  http://localhost:8080/api/measurements/{id}/export?format=json
+GET  http://localhost:8080/api/measurements/{id}/export?format=csv
 ```
 
-Recordings API:
+Measurement start request:
 
-```text
-POST http://localhost:8080/api/recordings/start
-POST http://localhost:8080/api/recordings/start?duration=15
-POST http://localhost:8080/api/recordings/{id}/stop
-POST http://localhost:8080/api/recordings/stop-all
-GET  http://localhost:8080/api/recordings/{id}
-GET  http://localhost:8080/api/recordings?limit=100&offset=0&date_from=2026-04-01&date_to=2026-04-26
-GET  http://localhost:8080/api/recordings/{id}/samples?limit=1000&offset=0
-GET  http://localhost:8080/api/recordings/{id}/extract?format=json
-GET  http://localhost:8080/api/recordings/{id}/extract?format=csv
-GET  http://localhost:8080/api/recordings/extract?format=json
-GET  http://localhost:8080/api/recordings/extract?format=csv
+```json
+{
+  "duration_s": 15,
+  "user_id": "1",
+  "project_id": "1"
+}
 ```
 
 `date_from` and `date_to` filter by `started_at`. Date-only values use UTC day bounds.
@@ -89,30 +85,34 @@ GET  http://localhost:8080/api/recordings/extract?format=csv
 Projects API:
 
 ```text
-GET    http://localhost:8080/api/projects
-GET    http://localhost:8080/api/projects/{id}
-POST   http://localhost:8080/api/projects
-PATCH  http://localhost:8080/api/projects/{id}
-DELETE http://localhost:8080/api/projects/{id}
-GET    http://localhost:8080/api/projects/{id}/users
-GET    http://localhost:8080/api/projects/{id}/users/{userId}
-DELETE http://localhost:8080/api/projects/{id}/users/{userId}
+GET http://localhost:8080/api/projects?limit=100&offset=0
 ```
 
 Users API:
 
 ```text
-GET    http://localhost:8080/api/users
-GET    http://localhost:8080/api/users/{id}
-POST   http://localhost:8080/api/users
-PATCH  http://localhost:8080/api/users/{id}
-DELETE http://localhost:8080/api/users/{id}
+GET http://localhost:8080/api/users?project_id=1&limit=100&offset=0
 ```
 
 Healthcheck:
 
 ```text
-GET http://localhost:8080/health
+GET http://localhost:8080/api/health
+```
+
+All v3 HTTP JSON responses use this envelope:
+
+```json
+{
+  "data": {},
+  "$meta": {
+    "status": "success",
+    "time": {
+      "ts": 148073249874239873,
+      "human": "25/02/2026, 00:03:55"
+    }
+  }
+}
 ```
 
 ## Input Format
@@ -149,7 +149,7 @@ SpO2 is an estimate and must be calibrated per optical sensor, LED current, plac
 
 SpO2 is only emitted when the perfusion index is high enough for oxygen estimation. `MIN_PERFUSION_INDEX` controls contact detection, while `MIN_SPO2_PERFUSION_INDEX` controls whether oxygen is reliable enough to report. `SPO2_OFFSET` can be used after calibration against a reference pulse oximeter.
 
-Measurements are session-based by default. Start a session, keep sending samples to `ws://localhost:8080/ws`, and the backend will collect `MEASUREMENT_DURATION_SECONDS` seconds of data, then emit one final result using the same `VitalSigns` JSON shape as `/metrics`. The default duration is 15 seconds.
+Measurements are session-based by default. Start a session, keep sending samples to `ws://localhost:8080/ws/devices/{device_id}`, and the backend will collect `MEASUREMENT_DURATION_SECONDS` seconds of data, then emit one final result using the same `VitalSigns` JSON shape as `/api/devices/{device_id}/metrics`. The default duration is 15 seconds.
 
 When no finger/contact is detected, vital values are not emitted as valid readings:
 

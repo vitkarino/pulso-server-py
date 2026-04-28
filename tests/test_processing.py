@@ -14,7 +14,7 @@ def _synthetic_payload(
     fs: int = 25,
     seconds: int = 18,
     bpm: float = 72.0,
-    recording_id: str | None = None,
+    measurement_id: str | None = None,
 ) -> str:
     count = fs * seconds
     t = np.arange(count) / fs
@@ -36,8 +36,8 @@ def _synthetic_payload(
         "fs": fs,
         "samples": samples,
     }
-    if recording_id is not None:
-        device["recording_id"] = recording_id
+    if measurement_id is not None:
+        device["measurement_id"] = measurement_id
 
     return json.dumps(
         {
@@ -140,11 +140,11 @@ class ProcessingTests(unittest.TestCase):
         self.assertIsNotNone(measurement.result.bpm)
         self.assertIsNotNone(measurement.result.spo2)
 
-    def test_measurement_ignores_samples_for_different_recording_id(self) -> None:
+    def test_measurement_ignores_samples_for_different_measurement_id(self) -> None:
         service = PPGProcessingService(AppConfig(), MetricsStore())
         service.start_measurement("A0:B7:65:12:34:56")
 
-        service.process_json(_synthetic_payload(recording_id="different-recording"))
+        service.process_json(_synthetic_payload(measurement_id="different-measurement"))
         measurement = service.get_measurement("A0:B7:65:12:34:56")
 
         self.assertIsNotNone(measurement)
@@ -152,12 +152,12 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(measurement.status, "running")
         self.assertEqual(measurement.samples_collected, 0)
 
-    def test_measurement_accepts_matching_recording_id(self) -> None:
+    def test_measurement_accepts_matching_measurement_id(self) -> None:
         service = PPGProcessingService(AppConfig(measurement_duration_seconds=15.0), MetricsStore())
         started = service.start_measurement("A0:B7:65:12:34:56")
         assert started.id is not None
 
-        service.process_json(_synthetic_payload(recording_id=started.id))
+        service.process_json(_synthetic_payload(measurement_id=started.id))
         measurement = service.get_measurement("A0:B7:65:12:34:56")
 
         self.assertIsNotNone(measurement)
@@ -176,19 +176,19 @@ class ProcessingTests(unittest.TestCase):
         assert stopped is not None
         self.assertEqual(stopped.status, "stopped")
 
-    def test_live_sample_payload_contains_recording_samples_and_metrics(self) -> None:
+    def test_live_sample_payload_contains_measurement_samples_and_metrics(self) -> None:
         service = PPGProcessingService(AppConfig(), MetricsStore())
         started = service.start_measurement("A0:B7:65:12:34:56")
         assert started.id is not None
-        raw_payload = _synthetic_payload(seconds=1, recording_id=started.id)
+        raw_payload = _synthetic_payload(seconds=1, measurement_id=started.id)
 
         metrics = service.process_json(raw_payload)
         live_payload = WebSocketController._live_sample_payload(raw_payload, metrics)
 
         self.assertIsNotNone(live_payload)
         assert live_payload is not None
-        self.assertEqual(live_payload["type"], "recording_sample_batch")
-        self.assertEqual(live_payload["recording_id"], started.id)
+        self.assertEqual(live_payload["type"], "measurement_sample_batch")
+        self.assertEqual(live_payload["measurement_id"], started.id)
         self.assertEqual(live_payload["device_id"], "A0:B7:65:12:34:56")
         self.assertEqual(live_payload["fs"], 25)
         self.assertEqual(live_payload["sample_count"], 25)

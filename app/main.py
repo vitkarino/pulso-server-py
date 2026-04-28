@@ -2,21 +2,29 @@ from datetime import UTC, date, datetime, time
 import csv
 from io import StringIO
 import json
+from time import time_ns
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query, Response, WebSocket
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import settings
 from app.measurement import RecordingMetadata
-from app.models import ProjectCreate, ProjectUpdate, UserCreate, UserUpdate
+from app.models import MeasurementStartRequest
 from app.processing.service import PPGProcessingService
 from app.recording_repository import RecordingRepository
 from app.state import metrics_store
 from app.websocket_handler import WebSocketController
 
-app = FastAPI(title="Pulso PPG Backend", version="0.1.0")
+app = FastAPI(
+    title="Pulso PPG Backend",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 recording_repository = RecordingRepository(settings.database_url)
 processing_service = PPGProcessingService(settings, metrics_store, recording_repository)
 ws_controller = WebSocketController(processing_service)
@@ -47,6 +55,18 @@ RECORDING_EXPORT_FIELDS = [
     "peak_count",
 ]
 SAMPLE_EXPORT_FIELDS = ["sample_index", "raw_ir", "raw_red", "raw_data"]
+PUBLIC_TO_INTERNAL_STATUS = {
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "cancelled": "stopped",
+}
+INTERNAL_TO_PUBLIC_STATUS = {
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "stopped": "cancelled",
+}
 
 
 @app.on_event("startup")
@@ -54,221 +74,110 @@ def startup() -> None:
     processing_service.prepare_database()
 
 
-@app.get("/health")
-def health() -> dict[str, str | int]:
-    return {"status": "ok", "ws_port": settings.ws_port}
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+    return _api_error(exc.status_code, _error_code(exc.detail), str(exc.detail))
 
 
-@app.get("/metrics")
-def get_metrics() -> dict[str, object]:
-    return {"devices": metrics_store.all()}
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    return _api_error(422, "validation_error", exc.errors()[0]["msg"])
 
 
-@app.get("/devices")
-def get_connected_devices() -> dict[str, object]:
-    return {
-        "devices": ws_controller.connected_devices(),
-        "live_subscribers": ws_controller.live_subscriber_count(),
-    }
+@app.get("/api/health")
+def api_health() -> JSONResponse:
+    return _api_success({"status": "ok", "ws_port": settings.ws_port})
 
 
-@app.get("/metrics/{device_id}")
-def get_device_metrics(device_id: str) -> object:
+@app.get("/api/devices")
+def list_devices(
+    connection_status: Literal["connected", "disconnected"] | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    connected = set(ws_controller.connected_devices())
+    latest_metrics = metrics_store.all()
+    known_device_ids = connected | set(latest_metrics)
+
+    devices = []
+    for device_id in sorted(known_device_ids):
+        status = "connected" if device_id in connected else "disconnected"
+        if connection_status is not None and status != connection_status:
+            continue
+        devices.append(
+            {
+                "id": device_id,
+                "connection_status": status,
+                "metrics": latest_metrics.get(device_id),
+            }
+        )
+
+    return _api_success(
+        {
+            "devices": devices[offset : offset + limit],
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
+@app.get("/api/devices/{device_id}/metrics")
+def get_api_device_metrics(device_id: str) -> JSONResponse:
     metrics = metrics_store.get(device_id)
     if metrics is None:
         raise HTTPException(status_code=404, detail="device metrics not found")
-    return metrics
+    return _api_success({"metrics": metrics})
 
 
 @app.get("/api/projects")
-def list_projects() -> dict[str, object]:
+def list_projects(
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
     _require_database()
-    return {"projects": recording_repository.list_projects()}
-
-
-@app.post("/api/projects", status_code=201)
-def create_project(project: ProjectCreate) -> object:
-    _require_database()
-    return recording_repository.create_project(project.model_dump())
-
-
-@app.get("/api/projects/{project_id}")
-def get_project(project_id: int) -> object:
-    _require_database()
-    return _get_project_or_404(project_id)
-
-
-@app.patch("/api/projects/{project_id}")
-def update_project(project_id: int, project: ProjectUpdate) -> object:
-    _require_database()
-    updated = recording_repository.update_project(
-        project_id,
-        project.model_dump(exclude_unset=True),
+    return _api_success(
+        {
+            "projects": recording_repository.list_projects(limit=limit, offset=offset),
+            "limit": limit,
+            "offset": offset,
+        }
     )
-    if updated is None:
-        raise HTTPException(status_code=404, detail="project not found")
-    return updated
-
-
-@app.delete("/api/projects/{project_id}", status_code=204)
-def delete_project(project_id: int) -> Response:
-    _require_database()
-    if not recording_repository.delete_project(project_id):
-        raise HTTPException(status_code=404, detail="project not found")
-    return Response(status_code=204)
-
-
-@app.get("/api/projects/{project_id}/users")
-def list_project_users(project_id: int) -> dict[str, object]:
-    _require_database()
-    _get_project_or_404(project_id)
-    return {"users": recording_repository.list_project_users(project_id)}
-
-
-@app.get("/api/projects/{project_id}/users/{user_id}")
-def add_project_user(project_id: int, user_id: int) -> object:
-    _require_database()
-    _get_project_or_404(project_id)
-    _get_user_or_404(user_id)
-    return recording_repository.add_project_user(project_id, user_id)
-
-
-@app.delete("/api/projects/{project_id}/users/{user_id}", status_code=204)
-def delete_project_user(project_id: int, user_id: int) -> Response:
-    _require_database()
-    _get_project_or_404(project_id)
-    _get_user_or_404(user_id)
-    if not recording_repository.delete_project_user(project_id, user_id):
-        raise HTTPException(status_code=404, detail="project user not found")
-    return Response(status_code=204)
 
 
 @app.get("/api/users")
-def list_users() -> dict[str, object]:
-    _require_database()
-    return {"users": recording_repository.list_users()}
-
-
-@app.post("/api/users", status_code=201)
-def create_user(user: UserCreate) -> object:
-    _require_database()
-    return recording_repository.create_user(user.model_dump())
-
-
-@app.get("/api/users/{user_id}")
-def get_user(user_id: int) -> object:
-    _require_database()
-    return _get_user_or_404(user_id)
-
-
-@app.patch("/api/users/{user_id}")
-def update_user(user_id: int, user: UserUpdate) -> object:
-    _require_database()
-    updated = recording_repository.update_user(
-        user_id,
-        user.model_dump(exclude_unset=True),
-    )
-    if updated is None:
-        raise HTTPException(status_code=404, detail="user not found")
-    return updated
-
-
-@app.delete("/api/users/{user_id}", status_code=204)
-def delete_user(user_id: int) -> Response:
-    _require_database()
-    if not recording_repository.delete_user(user_id):
-        raise HTTPException(status_code=404, detail="user not found")
-    return Response(status_code=204)
-
-
-@app.post("/measurements/{device_id}/start")
-def start_measurement(
-    device_id: str,
-    duration_seconds: float | None = Query(default=None, ge=settings.min_window_seconds),
-) -> object:
-    try:
-        return processing_service.start_measurement(device_id, duration_seconds)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/measurements")
-def get_measurements() -> dict[str, object]:
-    return {"measurements": processing_service.get_measurements()}
-
-
-@app.get("/measurements/{device_id}")
-def get_measurement(device_id: str) -> object:
-    measurement = processing_service.get_measurement(device_id)
-    if measurement is None:
-        raise HTTPException(status_code=404, detail="measurement not found")
-    return measurement
-
-
-@app.get("/api/recordings/extract")
-def extract_recordings(
-    export_format: Literal["json", "csv"] = Query(default="json", alias="format"),
-    date_from: str | None = Query(default=None),
-    date_to: str | None = Query(default=None),
-) -> object:
-    _require_database()
-    start_bound = _parse_date_bound(date_from, end_of_day=False)
-    end_bound = _parse_date_bound(date_to, end_of_day=True)
-    recordings = processing_service.list_recordings(
-        limit=None,
-        offset=0,
-        date_from=start_bound,
-        date_to=end_bound,
-    )
-    samples_by_recording = _load_samples_for_recordings(recordings)
-
-    if export_format == "csv":
-        return _recordings_csv_response("recordings.csv", recordings, samples_by_recording)
-
-    payload = {
-        "recordings": [
-            dict(recording, samples=samples_by_recording.get(recording["id"], []))
-            for recording in recordings
-        ]
-    }
-    return JSONResponse(content=jsonable_encoder(payload))
-
-
-@app.get("/api/recordings")
-def list_recordings(
+def list_users(
+    project_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    date_from: str | None = Query(default=None),
-    date_to: str | None = Query(default=None),
-) -> dict[str, object]:
+) -> JSONResponse:
     _require_database()
-    return {
-        "recordings": processing_service.list_recordings(
-            limit=limit,
-            offset=offset,
-            date_from=_parse_date_bound(date_from, end_of_day=False),
-            date_to=_parse_date_bound(date_to, end_of_day=True),
-        )
-    }
-
-
-@app.post("/api/recordings/start")
-async def start_recording(
-    duration: float | None = Query(default=None, gt=0),
-    device_id: str = Query(..., min_length=1),
-    user_name: str | None = Query(default=None),
-    user_id: str | None = Query(default=None),
-    project_name: str | None = Query(default=None),
-    project_id: str | None = Query(default=None),
-) -> object:
-    try:
-        recording = processing_service.start_recording(
-            duration_seconds=duration,
-            metadata=RecordingMetadata(
-                user_name=user_name,
-                user_id=user_id,
-                project_name=project_name,
+    if project_id is not None:
+        _get_project_or_404(project_id)
+    return _api_success(
+        {
+            "users": recording_repository.list_users(
                 project_id=project_id,
+                limit=limit,
+                offset=offset,
+            ),
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
+@app.post("/api/devices/{device_id}/measurements")
+async def start_api_measurement(
+    device_id: str,
+    body: MeasurementStartRequest = Body(default_factory=MeasurementStartRequest),
+) -> JSONResponse:
+    duration_seconds = body.duration_s or settings.measurement_duration_seconds
+    try:
+        measurement = processing_service.start_recording(
+            duration_seconds=duration_seconds,
+            metadata=RecordingMetadata(
+                user_id=body.user_id,
+                project_id=body.project_id,
             ),
             device_id=device_id,
         )
@@ -277,106 +186,196 @@ async def start_recording(
 
     command_sent = await ws_controller.send_start(
         device_id=device_id,
-        recording_id=recording.id or "",
-        duration_seconds=duration,
+        measurement_id=measurement.id or "",
+        duration_seconds=duration_seconds,
     )
     if not command_sent:
-        processing_service.stop_recording(recording.id or "")
+        processing_service.stop_recording(measurement.id or "")
         raise HTTPException(status_code=409, detail="device is not connected")
 
-    return recording
+    return _api_success({"measurement": _measurement_for_api(measurement)})
 
 
-@app.post("/api/recordings/stop-all")
-async def stop_all_recordings() -> dict[str, object]:
-    recordings = processing_service.stop_all_recordings()
-    stopped_devices: list[str] = []
-    for recording in recordings:
-        if recording.device_id is not None:
-            command_sent = await ws_controller.send_stop(device_id=recording.device_id)
-            if command_sent:
-                stopped_devices.append(recording.device_id)
-    return {"recordings": recordings, "stopped_devices": stopped_devices}
-
-
-@app.get("/api/recordings/{recording_id}/extract")
-def extract_recording(
-    recording_id: str,
-    export_format: Literal["json", "csv"] = Query(default="json", alias="format"),
-) -> object:
-    _require_database()
-    recording = _get_recording_or_404(recording_id)
-    samples = processing_service.get_recording_samples(recording_id, limit=None, offset=0)
-
-    if export_format == "csv":
-        return _recordings_csv_response(
-            f"recording-{recording_id}.csv",
-            [recording],
-            {recording_id: samples},
-        )
-
-    return JSONResponse(content=jsonable_encoder({"recording": recording, "samples": samples}))
-
-
-@app.get("/api/recordings/{recording_id}/samples")
-def get_recording_samples(
-    recording_id: str,
-    limit: int = Query(default=1000, ge=1, le=10000),
-    offset: int = Query(default=0, ge=0),
-) -> dict[str, object]:
-    _require_database()
-    _get_recording_or_404(recording_id)
-    return {
-        "recording_id": recording_id,
-        "samples": processing_service.get_recording_samples(
-            recording_id,
-            limit=limit,
-            offset=offset,
-        ),
-    }
-
-
-@app.get("/api/recordings/{recording_id}")
-def get_recording(recording_id: str) -> object:
-    _require_database()
-    return _get_recording_or_404(recording_id)
-
-
-@app.post("/api/recordings/{recording_id}/stop")
-async def stop_recording(recording_id: str) -> object:
-    stopped = processing_service.stop_recording(recording_id)
+@app.post("/api/measurements/{measurement_id}/stop")
+async def stop_api_measurement(measurement_id: str) -> JSONResponse:
+    stopped = processing_service.stop_recording(measurement_id)
     if stopped is not None:
         if stopped.device_id is not None:
             await ws_controller.send_stop(device_id=stopped.device_id)
-        return stopped
+        return _api_success({"measurement": _measurement_for_api(stopped)})
 
     if not processing_service.database_enabled:
-        raise HTTPException(status_code=404, detail="recording not found")
+        raise HTTPException(status_code=404, detail="measurement not found")
 
-    recording = processing_service.get_recording(recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail="recording not found")
-    if recording["status"] == "running":
+    measurement = processing_service.get_recording(measurement_id)
+    if measurement is None:
+        raise HTTPException(status_code=404, detail="measurement not found")
+    if measurement["status"] == "running":
         raise HTTPException(
             status_code=409,
-            detail="recording is not active in this process",
+            detail="measurement is not active in this process",
         )
-    return recording
+    return _api_success({"measurement": _measurement_for_api(measurement)})
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket) -> None:
-    await ws_controller.handle(websocket)
+@app.get("/api/measurements")
+def list_api_measurements(
+    device_id: str | None = Query(default=None),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+    status: Literal["running", "completed", "failed", "cancelled"] | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    _require_database()
+    measurements = processing_service.list_recordings(
+        limit=limit,
+        offset=offset,
+        date_from=_parse_date_bound(date_from, end_of_day=False),
+        date_to=_parse_date_bound(date_to, end_of_day=True),
+        device_id=device_id,
+        user_id=user_id,
+        project_id=project_id,
+        status=PUBLIC_TO_INTERNAL_STATUS[status] if status is not None else None,
+    )
+    return _api_success(
+        {
+            "measurements": [_measurement_for_api(measurement) for measurement in measurements],
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
-@app.websocket("/ws/esp32")
-async def esp32_websocket_endpoint(websocket: WebSocket) -> None:
-    await ws_controller.handle(websocket)
+@app.get("/api/measurements/{measurement_id}/export")
+def export_api_measurement(
+    measurement_id: str,
+    export_format: Literal["json", "csv"] = Query(default="json", alias="format"),
+) -> object:
+    _require_database()
+    measurement = _get_recording_or_404(measurement_id)
+    samples = processing_service.get_recording_samples(measurement_id, limit=None, offset=0)
+
+    if export_format == "csv":
+        return _recordings_csv_response(
+            f"measurement-{measurement_id}.csv",
+            [measurement],
+            {measurement_id: samples},
+        )
+
+    return _api_success(
+        {
+            "measurement": _measurement_for_api(measurement),
+            "samples": samples,
+        }
+    )
 
 
-@app.websocket("/recordings/live")
-async def live_websocket_endpoint(websocket: WebSocket) -> None:
-    await ws_controller.handle_live(websocket)
+@app.get("/api/measurements/{measurement_id}/samples")
+def get_api_measurement_samples(
+    measurement_id: str,
+    limit: int = Query(default=1000, ge=1, le=10000),
+    offset: int = Query(default=0, ge=0),
+) -> JSONResponse:
+    _require_database()
+    _get_recording_or_404(measurement_id)
+    return _api_success(
+        {
+            "measurement_id": measurement_id,
+            "samples": processing_service.get_recording_samples(
+                measurement_id,
+                limit=limit,
+                offset=offset,
+            ),
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
+@app.get("/api/measurements/{measurement_id}")
+def get_api_measurement(measurement_id: str) -> JSONResponse:
+    _require_database()
+    return _api_success({"measurement": _measurement_for_api(_get_recording_or_404(measurement_id))})
+
+
+@app.websocket("/ws/devices/{device_id}")
+async def device_websocket_endpoint(websocket: WebSocket, device_id: str) -> None:
+    await ws_controller.handle_device(websocket, device_id)
+
+
+@app.websocket("/ws/measurements/{measurement_id}/stream")
+async def measurement_stream_websocket_endpoint(websocket: WebSocket, measurement_id: str) -> None:
+    await ws_controller.handle_measurement_stream(websocket, measurement_id)
+
+
+def _api_success(data: object, *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(
+        content=jsonable_encoder(
+            {
+                "data": data,
+                "$meta": _meta("success"),
+            }
+        ),
+        status_code=status_code,
+    )
+
+
+def _api_error(http_status: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(
+        content=jsonable_encoder(
+            {
+                "data": None,
+                "$meta": _meta(
+                    "error",
+                    error={
+                        "http_status": http_status,
+                        "code": code,
+                        "message": message,
+                    },
+                ),
+            }
+        ),
+        status_code=http_status,
+    )
+
+
+def _meta(status: Literal["success", "error"], *, error: dict[str, object] | None = None) -> dict[str, object]:
+    now = datetime.now(UTC)
+    meta: dict[str, object] = {
+        "status": status,
+        "time": {
+            "ts": time_ns(),
+            "human": now.strftime("%d/%m/%Y, %H:%M:%S"),
+        },
+    }
+    if error is not None:
+        meta["error"] = error
+    return meta
+
+
+def _error_code(detail: object) -> str:
+    if not isinstance(detail, str) or not detail:
+        return "request_error"
+    normalized = "".join(char.lower() if char.isalnum() else "_" for char in detail)
+    return "_".join(part for part in normalized.split("_") if part) or "request_error"
+
+
+def _measurement_for_api(measurement: object) -> object:
+    payload = jsonable_encoder(measurement)
+    if isinstance(payload, dict):
+        _rewrite_measurement_status(payload)
+    return payload
+
+
+def _rewrite_measurement_status(payload: dict[str, object]) -> None:
+    status = payload.get("status")
+    if isinstance(status, str):
+        payload["status"] = INTERNAL_TO_PUBLIC_STATUS.get(status, status)
+    if "duration_seconds" in payload and "duration_s" not in payload:
+        payload["duration_s"] = payload["duration_seconds"]
 
 
 def _require_database() -> None:
@@ -387,7 +386,7 @@ def _require_database() -> None:
 def _get_recording_or_404(recording_id: str) -> dict[str, object]:
     recording = processing_service.get_recording(recording_id)
     if recording is None:
-        raise HTTPException(status_code=404, detail="recording not found")
+        raise HTTPException(status_code=404, detail="measurement not found")
     return recording
 
 
@@ -396,13 +395,6 @@ def _get_project_or_404(project_id: int) -> dict[str, object]:
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
     return project
-
-
-def _get_user_or_404(user_id: int) -> dict[str, object]:
-    user = recording_repository.get_user(user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="user not found")
-    return user
 
 
 def _parse_date_bound(raw_value: str | None, *, end_of_day: bool) -> datetime | None:
@@ -429,18 +421,6 @@ def _parse_date_bound(raw_value: str | None, *, end_of_day: bool) -> datetime | 
     if parsed_datetime.tzinfo is None:
         return parsed_datetime.replace(tzinfo=UTC)
     return parsed_datetime
-
-
-def _load_samples_for_recordings(recordings: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
-    samples_by_recording: dict[str, list[dict[str, object]]] = {}
-    for recording in recordings:
-        recording_id = str(recording["id"])
-        samples_by_recording[recording_id] = processing_service.get_recording_samples(
-            recording_id,
-            limit=None,
-            offset=0,
-        )
-    return samples_by_recording
 
 
 def _recordings_csv_response(

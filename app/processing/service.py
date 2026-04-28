@@ -149,13 +149,28 @@ class PPGProcessingService:
         repository = self._require_recording_repository()
         return repository.get_recording(recording_id)
 
-    def list_recordings(self, *, limit: int | None, offset: int, date_from=None, date_to=None):
+    def list_recordings(
+        self,
+        *,
+        limit: int | None,
+        offset: int,
+        date_from=None,
+        date_to=None,
+        device_id: str | None = None,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        status: str | None = None,
+    ):
         repository = self._require_recording_repository()
         return repository.list_recordings(
             limit=limit,
             offset=offset,
             date_from=date_from,
             date_to=date_to,
+            device_id=device_id,
+            user_id=user_id,
+            project_id=project_id,
+            status=status,
         )
 
     def get_recording_samples(self, recording_id: str, *, limit: int | None, offset: int):

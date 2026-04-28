@@ -9,8 +9,8 @@ const char *ssid = "YOUR_WIFI_SSID";
 const char *password = "YOUR_WIFI_PASSWORD";
 const char *server_ip = "192.168.1.100";
 const uint16_t server_port = 8080;
-const char *ws_path = "/ws/esp32";
 const char *deviceId = "F4:65:0B:55:2E:80";
+char wsPath[96];
 
 const byte ledBrightness = 0x1F;
 const byte sampleAverage = 4;
@@ -42,7 +42,7 @@ char jsonBuffer[8192];
 
 bool wsConnected = false;
 bool canStream = false;
-char activeRecordingId[40] = "";
+char activeMeasurementId[40] = "";
 unsigned long streamStartedAtMs = 0;
 unsigned long streamDurationMs = 0;
 unsigned long lastWiFiReconnectMs = 0;
@@ -57,7 +57,7 @@ void sendStartAck();
 void sendStopAck();
 void sendFinished();
 bool sendBatch();
-void stopStreaming(bool clearRecording = true);
+void stopStreaming(bool clearMeasurement = true);
 
 void connectWiFi() {
   WiFi.mode(WIFI_STA);
@@ -121,7 +121,8 @@ void setupSensor() {
 }
 
 void setupWebSocket() {
-  webSocket.begin(server_ip, server_port, ws_path);
+  snprintf(wsPath, sizeof(wsPath), "/ws/devices/%s", deviceId);
+  webSocket.begin(server_ip, server_port, wsPath);
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
   webSocket.enableHeartbeat(15000, 3000, 2);
@@ -135,8 +136,8 @@ void sendControl(const char *type) {
   controlDoc.clear();
   controlDoc["type"] = type;
   controlDoc["device_id"] = deviceId;
-  if (activeRecordingId[0] != '\0') {
-    controlDoc["recording_id"] = activeRecordingId;
+  if (activeMeasurementId[0] != '\0') {
+    controlDoc["measurement_id"] = activeMeasurementId;
   }
 
   size_t bytesWritten = serializeJson(controlDoc, jsonBuffer, sizeof(jsonBuffer));
@@ -180,13 +181,13 @@ void sendFinished() {
   sendControl("finished");
 }
 
-void startStreaming(const char *recordingId, unsigned long durationMs) {
-  if (recordingId == nullptr || recordingId[0] == '\0') {
-    sendLog("start command without recording_id");
+void startStreaming(const char *measurementId, unsigned long durationMs) {
+  if (measurementId == nullptr || measurementId[0] == '\0') {
+    sendLog("start command without measurement_id");
     return;
   }
 
-  snprintf(activeRecordingId, sizeof(activeRecordingId), "%s", recordingId);
+  snprintf(activeMeasurementId, sizeof(activeMeasurementId), "%s", measurementId);
   streamDurationMs = durationMs;
   streamStartedAtMs = millis();
   batchCount = 0;
@@ -201,10 +202,10 @@ void startStreaming(const char *recordingId, unsigned long durationMs) {
 
   sendStartAck();
   Serial.print("Streaming started: ");
-  Serial.println(activeRecordingId);
+  Serial.println(activeMeasurementId);
 }
 
-void stopStreaming(bool clearRecording) {
+void stopStreaming(bool clearMeasurement) {
   canStream = false;
   streamDurationMs = 0;
   streamStartedAtMs = 0;
@@ -212,8 +213,8 @@ void stopStreaming(bool clearRecording) {
   streamSamplesCollected = 0;
   targetStreamSamples = 0;
 
-  if (clearRecording) {
-    activeRecordingId[0] = '\0';
+  if (clearMeasurement) {
+    activeMeasurementId[0] = '\0';
   }
 }
 
@@ -222,7 +223,7 @@ bool sendBatch() {
     return true;
   }
 
-  if (!wsConnected || !canStream || activeRecordingId[0] == '\0') {
+  if (!wsConnected || !canStream || activeMeasurementId[0] == '\0') {
     batchCount = 0;
     return false;
   }
@@ -230,7 +231,7 @@ bool sendBatch() {
   batchDoc.clear();
   JsonObject device = batchDoc["device"].to<JsonObject>();
   device["id"] = deviceId;
-  device["recording_id"] = activeRecordingId;
+  device["measurement_id"] = activeMeasurementId;
   device["fs"] = reportedSampleRate;
 
   unsigned long now = millis();
@@ -329,7 +330,7 @@ bool streamDurationFinished() {
 }
 
 void handleStartCommand(JsonObject payload) {
-  const char *recordingId = payload["recording_id"] | "";
+  const char *measurementId = payload["measurement_id"] | "";
   float durationSeconds = payload["duration"] | 0.0;
   unsigned long durationMs = 0;
 
@@ -337,7 +338,7 @@ void handleStartCommand(JsonObject payload) {
     durationMs = (unsigned long)(durationSeconds * 1000.0);
   }
 
-  startStreaming(recordingId, durationMs);
+  startStreaming(measurementId, durationMs);
 }
 
 void handleStopCommand() {
