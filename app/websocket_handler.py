@@ -1,6 +1,7 @@
+import asyncio
 import json
 from threading import RLock
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -10,11 +11,20 @@ from app.processing.service import PPGProcessingService
 
 
 class WebSocketController:
-    def __init__(self, service: PPGProcessingService) -> None:
+    def __init__(
+        self,
+        service: PPGProcessingService,
+        *,
+        metrics_formatter: Callable[[Any], object] | None = None,
+        ack_timeout_seconds: float = 3.0,
+    ) -> None:
         self._service = service
+        self._ack_timeout_seconds = ack_timeout_seconds
+        self._metrics_formatter = metrics_formatter or self._default_metrics_formatter
         self._lock = RLock()
         self._connections: dict[str, WebSocket] = {}
         self._measurement_subscribers: dict[str, set[WebSocket]] = {}
+        self._pending_start_acks: dict[str, asyncio.Future[None]] = {}
 
     def connected_devices(self) -> list[str]:
         with self._lock:
@@ -31,6 +41,8 @@ class WebSocketController:
         if websocket is None:
             return False
 
+        loop = asyncio.get_running_loop()
+        start_ack = loop.create_future()
         payload: dict[str, Any] = {
             "type": "start",
             "measurement_id": measurement_id,
@@ -39,10 +51,20 @@ class WebSocketController:
             payload["duration"] = duration_seconds
 
         try:
+            with self._lock:
+                self._pending_start_acks[measurement_id] = start_ack
             await websocket.send_json(payload)
+            await asyncio.wait_for(start_ack, timeout=self._ack_timeout_seconds)
         except RuntimeError:
             self._unregister(device_id, websocket)
             return False
+        except asyncio.TimeoutError:
+            self._unregister(device_id, websocket)
+            return False
+        finally:
+            with self._lock:
+                if self._pending_start_acks.get(measurement_id) is start_ack:
+                    del self._pending_start_acks[measurement_id]
         return True
 
     async def send_stop(self, *, device_id: str) -> bool:
@@ -144,7 +166,12 @@ class WebSocketController:
         if not isinstance(payload, dict):
             return False
         message_type = payload.get("type")
-        if message_type in {"start_ack", "stop_ack", "log"}:
+        if message_type == "start_ack":
+            measurement_id = payload.get("measurement_id")
+            if isinstance(measurement_id, str):
+                self._ack_start(measurement_id)
+            return True
+        if message_type in {"stop_ack", "log"}:
             return True
         if message_type != "finished":
             return False
@@ -164,6 +191,12 @@ class WebSocketController:
         with self._lock:
             if self._connections.get(device_id) is websocket:
                 del self._connections[device_id]
+
+    def _ack_start(self, measurement_id: str) -> None:
+        with self._lock:
+            start_ack = self._pending_start_acks.get(measurement_id)
+        if start_ack is not None and not start_ack.done():
+            start_ack.set_result(None)
 
     async def _broadcast_live_sample_batch(self, message: str | bytes, metrics: object) -> None:
         payload = self._live_sample_payload(message, metrics)
@@ -189,8 +222,7 @@ class WebSocketController:
         for subscriber in stale:
             self._unregister_measurement_stream(subscriber)
 
-    @staticmethod
-    def _live_sample_payload(message: str | bytes, metrics: object) -> dict[str, Any] | None:
+    def _live_sample_payload(self, message: str | bytes, metrics: object) -> dict[str, Any] | None:
         try:
             payload = json.loads(message)
         except (TypeError, json.JSONDecodeError):
@@ -218,8 +250,14 @@ class WebSocketController:
             "temperature": device.get("temp"),
             "sample_count": len(samples),
             "samples": samples,
-            "metrics": metrics.model_dump(mode="json"),
+            "metrics": self._metrics_formatter(metrics),
         }
+
+    @staticmethod
+    def _default_metrics_formatter(metrics: Any) -> object:
+        if hasattr(metrics, "model_dump"):
+            return metrics.model_dump(mode="json")
+        return metrics
 
     def _unregister_measurement_stream(self, websocket: WebSocket) -> None:
         with self._lock:

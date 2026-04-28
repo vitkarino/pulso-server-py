@@ -25,6 +25,7 @@ Body:
 ```json
 {
   "duration_s": 15,
+  "user_name": "tester",
   "user_id": "1",
   "project_id": "1"
 }
@@ -38,6 +39,9 @@ Useful options:
 ```bash
 python3 embedded/simulator/simulator.py --port 8080 --device-id sim-device-001 --bpm 80 --fs 25
 ```
+
+If `--bpm`, `--spo2-ratio`, `--temperature`, or `--noise` are omitted, the simulator picks
+reasonable random values for each new measurement.
 
 For a quick stream without calling the HTTP start endpoint:
 

@@ -2,7 +2,6 @@ from datetime import UTC, date, datetime, time
 import csv
 from io import StringIO
 import json
-from time import time_ns
 from typing import Literal
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
@@ -12,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import settings
 from app.measurement import RecordingMetadata
-from app.models import MeasurementStartRequest
+from app.models import MeasurementStartRequest, MeasurementState, VitalSigns
 from app.processing.service import PPGProcessingService
 from app.recording_repository import RecordingRepository
 from app.state import metrics_store
@@ -27,7 +26,6 @@ app = FastAPI(
 )
 recording_repository = RecordingRepository(settings.database_url)
 processing_service = PPGProcessingService(settings, metrics_store, recording_repository)
-ws_controller = WebSocketController(processing_service)
 
 
 RECORDING_EXPORT_FIELDS = [
@@ -105,11 +103,11 @@ def list_devices(
         if connection_status is not None and status != connection_status:
             continue
         devices.append(
-            {
-                "id": device_id,
-                "connection_status": status,
-                "metrics": latest_metrics.get(device_id),
-            }
+            _device_for_api(
+                device_id=device_id,
+                connection_status=status,
+                metrics=latest_metrics.get(device_id),
+            )
         )
 
     return _api_success(
@@ -126,7 +124,7 @@ def get_api_device_metrics(device_id: str) -> JSONResponse:
     metrics = metrics_store.get(device_id)
     if metrics is None:
         raise HTTPException(status_code=404, detail="device metrics not found")
-    return _api_success({"metrics": metrics})
+    return _api_success({"metrics": _metrics_for_api(metrics)})
 
 
 @app.get("/api/projects")
@@ -172,11 +170,16 @@ async def start_api_measurement(
     body: MeasurementStartRequest = Body(default_factory=MeasurementStartRequest),
 ) -> JSONResponse:
     duration_seconds = body.duration_s or settings.measurement_duration_seconds
+    user_name = body.user_name
+    if user_name is None and device_id.startswith("sim-"):
+        user_name = "tester"
     try:
         measurement = processing_service.start_recording(
             duration_seconds=duration_seconds,
             metadata=RecordingMetadata(
+                user_name=user_name,
                 user_id=body.user_id,
+                project_name=body.project_name,
                 project_id=body.project_id,
             ),
             device_id=device_id,
@@ -191,7 +194,7 @@ async def start_api_measurement(
     )
     if not command_sent:
         processing_service.stop_recording(measurement.id or "")
-        raise HTTPException(status_code=409, detail="device is not connected")
+        raise HTTPException(status_code=409, detail="device did not acknowledge start command")
 
     return _api_success({"measurement": _measurement_for_api(measurement)})
 
@@ -311,13 +314,17 @@ async def measurement_stream_websocket_endpoint(websocket: WebSocket, measuremen
     await ws_controller.handle_measurement_stream(websocket, measurement_id)
 
 
+JSON_ENCODERS = {datetime: lambda value: _datetime_for_api(value)}
+
+
 def _api_success(data: object, *, status_code: int = 200) -> JSONResponse:
     return JSONResponse(
         content=jsonable_encoder(
             {
                 "data": data,
                 "$meta": _meta("success"),
-            }
+            },
+            custom_encoder=JSON_ENCODERS,
         ),
         status_code=status_code,
     )
@@ -336,7 +343,8 @@ def _api_error(http_status: int, code: str, message: str) -> JSONResponse:
                         "message": message,
                     },
                 ),
-            }
+            },
+            custom_encoder=JSON_ENCODERS,
         ),
         status_code=http_status,
     )
@@ -347,8 +355,7 @@ def _meta(status: Literal["success", "error"], *, error: dict[str, object] | Non
     meta: dict[str, object] = {
         "status": status,
         "time": {
-            "ts": time_ns(),
-            "human": now.strftime("%d/%m/%Y, %H:%M:%S"),
+            "iso": _datetime_for_api(now),
         },
     }
     if error is not None:
@@ -364,18 +371,148 @@ def _error_code(detail: object) -> str:
 
 
 def _measurement_for_api(measurement: object) -> object:
-    payload = jsonable_encoder(measurement)
-    if isinstance(payload, dict):
-        _rewrite_measurement_status(payload)
-    return payload
+    if isinstance(measurement, MeasurementState):
+        result = measurement.result
+        finished_at = measurement.completed_at
+        duration_ms = None
+        if finished_at is not None:
+            duration_ms = int(round((finished_at - measurement.started_at).total_seconds() * 1000))
+        device_id = measurement.device_id
+        if device_id is None and result is not None:
+            device_id = result.device_id
+        return {
+            "id": measurement.id,
+            "is_simulated": _is_simulated(device_id),
+            "user_id": measurement.user_id,
+            "project_id": measurement.project_id,
+            "device_id": device_id,
+            "time": {
+                "started_at": _datetime_for_api(measurement.started_at),
+                "finished_at": _datetime_for_api(finished_at),
+                "duration_ms": duration_ms,
+            },
+            "status": INTERNAL_TO_PUBLIC_STATUS.get(measurement.status, measurement.status),
+            "channels": ["ir", "red"],
+            "sample_rate": result.fs if result is not None else None,
+            "sensor_temp": result.temperature if result is not None else None,
+            "bpm": result.bpm if result is not None else None,
+            "spo2": result.spo2 if result is not None else None,
+            "ratio": result.ratio if result is not None else None,
+            "sensor_confidence": result.sensor_confidence if result is not None else None,
+            "signal_quality": _signal_quality_for_api(result.signal_quality if result is not None else None),
+        }
+
+    payload = dict(measurement) if isinstance(measurement, dict) else jsonable_encoder(
+        measurement,
+        custom_encoder=JSON_ENCODERS,
+    )
+    if not isinstance(payload, dict):
+        return payload
+
+    device_id = _string_or_none(payload.get("device_id"))
+    return {
+        "id": payload.get("id"),
+        "is_simulated": _is_simulated(device_id),
+        "user_id": payload.get("user_id"),
+        "project_id": payload.get("project_id"),
+        "device_id": device_id,
+        "time": {
+            "started_at": _datetime_for_api(payload.get("started_at")),
+            "finished_at": _datetime_for_api(payload.get("finished_at")),
+            "duration_ms": payload.get("duration_ms"),
+        },
+        "status": _public_status(payload.get("status")),
+        "channels": _channels_for_api(payload.get("signal_type")),
+        "sample_rate": payload.get("sample_rate"),
+        "sensor_temp": payload.get("sensor_temp"),
+        "bpm": payload.get("bpm"),
+        "spo2": payload.get("spo2"),
+        "ratio": payload.get("ratio"),
+        "sensor_confidence": payload.get("sensor_confidence"),
+        "signal_quality": _signal_quality_for_api(payload.get("signal_quality")),
+    }
 
 
-def _rewrite_measurement_status(payload: dict[str, object]) -> None:
-    status = payload.get("status")
+def _device_for_api(
+    *,
+    device_id: str,
+    connection_status: Literal["connected", "disconnected"],
+    metrics: VitalSigns | None,
+) -> dict[str, object]:
+    return {
+        "id": device_id,
+        "is_simulated": _is_simulated(device_id),
+        "connection_status": connection_status,
+        "metrics": _metrics_for_api(metrics) if metrics is not None else None,
+    }
+
+
+def _metrics_for_api(metrics: VitalSigns) -> dict[str, object]:
+    return {
+        "device_id": metrics.device_id,
+        "time": {"measured_at": _datetime_for_api(metrics.timestamp)},
+        "sample_rate": metrics.fs,
+        "sensor_temp": metrics.temperature,
+        "bpm": metrics.bpm,
+        "spo2": metrics.spo2,
+        "ratio": metrics.ratio,
+        "sensor_confidence": metrics.sensor_confidence,
+        "signal_quality": _signal_quality_for_api(metrics.signal_quality),
+    }
+
+
+def _signal_quality_for_api(signal_quality: object | None) -> dict[str, object] | None:
+    if signal_quality is None:
+        return None
+    payload = jsonable_encoder(signal_quality)
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "level": payload.get("level"),
+        "reason": payload.get("reason"),
+        "peak_count": payload.get("peak_count"),
+        "window_seconds": payload.get("window_seconds"),
+        "perfusion_index": payload.get("perfusion_index"),
+        "samples_in_window": payload.get("samples_in_window"),
+    }
+
+
+def _datetime_for_api(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        return _datetime_for_api(parsed)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return str(value)
+
+
+def _public_status(status: object) -> object:
     if isinstance(status, str):
-        payload["status"] = INTERNAL_TO_PUBLIC_STATUS.get(status, status)
-    if "duration_seconds" in payload and "duration_s" not in payload:
-        payload["duration_s"] = payload["duration_seconds"]
+        return INTERNAL_TO_PUBLIC_STATUS.get(status, status)
+    return status
+
+
+def _channels_for_api(signal_type: object) -> list[str]:
+    if signal_type == "IR":
+        return ["ir"]
+    if signal_type == "R":
+        return ["red"]
+    return ["ir", "red"]
+
+
+def _is_simulated(device_id: str | None) -> bool:
+    return bool(device_id and device_id.startswith("sim-"))
+
+
+def _string_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def _require_database() -> None:
@@ -469,10 +606,13 @@ def _csv_recording_row(
 
 def _csv_value(value: object) -> object:
     if isinstance(value, datetime):
-        return value.isoformat()
+        return _datetime_for_api(value)
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False)
     return value
+
+
+ws_controller = WebSocketController(processing_service, metrics_formatter=_metrics_for_api)
 
 
 if __name__ == "__main__":

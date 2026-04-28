@@ -144,6 +144,7 @@ class RecordingRepository:
         metadata.create_all(engine)
         with engine.begin() as connection:
             self._refresh_recording_counts(connection)
+            self._cancel_running_recordings(connection)
 
     def list_users(
         self,
@@ -322,6 +323,30 @@ class RecordingRepository:
                 update(recordings_table)
                 .where(recordings_table.c.id == recording_id)
                 .values(**values)
+            )
+
+    def _cancel_running_recordings(self, connection: Connection) -> None:
+        now = datetime.now(UTC)
+        statement = select(recordings_table.c.id, recordings_table.c.started_at).where(
+            recordings_table.c.status == "running"
+        )
+        rows = connection.execute(statement).mappings().all()
+        for row in rows:
+            started_at = row["started_at"]
+            duration_ms = None
+            if isinstance(started_at, datetime):
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=UTC)
+                duration_ms = int(round(max(0.0, (now - started_at).total_seconds()) * 1000))
+            connection.execute(
+                update(recordings_table)
+                .where(recordings_table.c.id == row["id"])
+                .values(
+                    status="stopped",
+                    finished_at=now,
+                    duration_ms=duration_ms,
+                    updated_at=now,
+                )
             )
 
     def insert_samples(self, recording_id: str, samples: list[dict[str, Any]]) -> None:

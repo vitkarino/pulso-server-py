@@ -14,16 +14,28 @@ from websockets.exceptions import ConnectionClosed
 
 
 @dataclass(frozen=True)
+class MeasurementProfile:
+    bpm: float
+    spo2_ratio: float
+    temperature: float
+    noise: float
+    ir_dc: float
+    red_dc: float
+    ir_ac: float
+    phase_offset: float
+
+
+@dataclass(frozen=True)
 class SimulatorConfig:
     host: str
     port: int
     device_id: str
     fs: int
     batch_size: int
-    bpm: float
-    spo2_ratio: float
-    temperature: float
-    noise: float
+    bpm: float | None
+    spo2_ratio: float | None
+    temperature: float | None
+    noise: float | None
     auto_start: bool
     auto_duration_s: float
     once: bool
@@ -39,6 +51,7 @@ class PulsoDeviceSimulator:
         self._stop_event = asyncio.Event()
         self._active_task: asyncio.Task[None] | None = None
         self._active_measurement_id: str | None = None
+        self._active_profile: MeasurementProfile | None = None
         self._completed_once = False
 
     async def run(self) -> None:
@@ -85,12 +98,18 @@ class PulsoDeviceSimulator:
                     await self._send_log(websocket, "start command without measurement_id")
                     continue
                 duration_s = _positive_float(message.get("duration"), self._config.auto_duration_s)
+                print(
+                    f"start command received: measurement_id={measurement_id}, duration_s={duration_s}",
+                    flush=True,
+                )
                 await self._start_stream(websocket, measurement_id, duration_s)
                 continue
             if message_type == "stop":
+                print("stop command received", flush=True)
                 await self._stop_stream(websocket)
                 continue
 
+            print(f"ignored server message type: {message_type}", flush=True)
             await self._send_log(websocket, f"ignored message type: {message_type}")
 
     async def _start_stream(
@@ -102,6 +121,7 @@ class PulsoDeviceSimulator:
         if self._active_task is not None and not self._active_task.done():
             self._active_task.cancel()
         self._active_measurement_id = measurement_id
+        self._active_profile = self._new_profile()
         await websocket.send(
             json.dumps(
                 {
@@ -133,6 +153,7 @@ class PulsoDeviceSimulator:
             self._active_task.cancel()
         self._active_task = None
         self._active_measurement_id = None
+        self._active_profile = None
         self._completed_once = True
         await websocket.send(
             json.dumps(
@@ -155,8 +176,15 @@ class PulsoDeviceSimulator:
     ) -> None:
         total_samples = max(1, int(round(duration_s * self._config.fs)))
         sent_samples = 0
+        profile = self._active_profile or self._new_profile()
         print(
             f"stream started: measurement_id={measurement_id}, duration_s={duration_s}, samples={total_samples}",
+            flush=True,
+        )
+        print(
+            "profile: "
+            f"bpm={profile.bpm:.1f}, spo2_ratio={profile.spo2_ratio:.3f}, "
+            f"temperature={profile.temperature:.1f}, noise={profile.noise:.1f}",
             flush=True,
         )
 
@@ -164,7 +192,7 @@ class PulsoDeviceSimulator:
             while sent_samples < total_samples and not self._stop_event.is_set():
                 batch_count = min(self._config.batch_size, total_samples - sent_samples)
                 samples = [
-                    self._sample(sample_index)
+                    self._sample(sample_index, profile)
                     for sample_index in range(sent_samples, sent_samples + batch_count)
                 ]
                 await websocket.send(
@@ -173,7 +201,7 @@ class PulsoDeviceSimulator:
                             "device": {
                                 "id": self._config.device_id,
                                 "measurement_id": measurement_id,
-                                "temp": self._config.temperature,
+                                "temp": profile.temperature,
                                 "fs": self._config.fs,
                                 "samples": samples,
                             }
@@ -211,18 +239,36 @@ class PulsoDeviceSimulator:
             if self._active_measurement_id == measurement_id:
                 self._active_measurement_id = None
                 self._active_task = None
+                self._active_profile = None
 
-    def _sample(self, sample_index: int) -> dict[str, float]:
+    def _new_profile(self) -> MeasurementProfile:
+        return MeasurementProfile(
+            bpm=self._config.bpm if self._config.bpm is not None else random.uniform(58.0, 96.0),
+            spo2_ratio=(
+                self._config.spo2_ratio
+                if self._config.spo2_ratio is not None
+                else random.uniform(0.45, 0.68)
+            ),
+            temperature=(
+                self._config.temperature
+                if self._config.temperature is not None
+                else random.uniform(30.5, 33.5)
+            ),
+            noise=self._config.noise if self._config.noise is not None else random.uniform(25.0, 90.0),
+            ir_dc=random.uniform(78_000.0, 96_000.0),
+            red_dc=random.uniform(48_000.0, 60_000.0),
+            ir_ac=random.uniform(1_000.0, 2_200.0),
+            phase_offset=random.uniform(0.0, 2.0 * math.pi),
+        )
+
+    def _sample(self, sample_index: int, profile: MeasurementProfile) -> dict[str, float]:
         t = sample_index / self._config.fs
-        frequency_hz = self._config.bpm / 60.0
-        ir_dc = 84_000.0
-        red_dc = 53_000.0
-        ir_ac = 1_500.0
-        red_ac = self._config.spo2_ratio * ir_ac * red_dc / ir_dc
-        phase = 2.0 * math.pi * frequency_hz * t
+        frequency_hz = profile.bpm / 60.0
+        red_ac = profile.spo2_ratio * profile.ir_ac * profile.red_dc / profile.ir_dc
+        phase = 2.0 * math.pi * frequency_hz * t + profile.phase_offset
         return {
-            "ir": ir_dc + ir_ac * math.sin(phase) + random.gauss(0.0, self._config.noise),
-            "r": red_dc + red_ac * math.sin(phase) + random.gauss(0.0, self._config.noise * 0.75),
+            "ir": profile.ir_dc + profile.ir_ac * math.sin(phase) + random.gauss(0.0, profile.noise),
+            "r": profile.red_dc + red_ac * math.sin(phase) + random.gauss(0.0, profile.noise * 0.75),
         }
 
     async def _send_log(self, websocket: websockets.ClientConnection, message: str) -> None:
@@ -244,10 +290,10 @@ def parse_args() -> SimulatorConfig:
     parser.add_argument("--device-id", default="sim-device-001")
     parser.add_argument("--fs", type=int, default=25)
     parser.add_argument("--batch-size", type=int, default=25)
-    parser.add_argument("--bpm", type=float, default=72.0)
-    parser.add_argument("--spo2-ratio", type=float, default=0.55)
-    parser.add_argument("--temperature", type=float, default=31.5)
-    parser.add_argument("--noise", type=float, default=60.0)
+    parser.add_argument("--bpm", type=float, default=None)
+    parser.add_argument("--spo2-ratio", type=float, default=None)
+    parser.add_argument("--temperature", type=float, default=None)
+    parser.add_argument("--noise", type=float, default=None)
     parser.add_argument(
         "--auto-start",
         action="store_true",

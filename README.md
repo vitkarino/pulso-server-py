@@ -45,8 +45,24 @@ During an active measurement, `/ws/measurements/{measurement_id}/stream` broadca
     }
   ],
   "metrics": {
+    "device_id": "F4:65:0B:55:2E:80",
+    "time": {
+      "measured_at": "2026-04-28T11:51:20.778832Z"
+    },
+    "sample_rate": 25.0,
+    "sensor_temp": 25.6,
     "bpm": 71.4,
-    "spo2": 98.0
+    "spo2": 98.0,
+    "ratio": 0.55,
+    "sensor_confidence": 0.95,
+    "signal_quality": {
+      "level": "high",
+      "reason": null,
+      "peak_count": 15,
+      "window_seconds": 10.0,
+      "perfusion_index": 2.8,
+      "samples_in_window": 250
+    }
   }
 }
 ```
@@ -56,6 +72,42 @@ Latest metrics:
 ```text
 GET http://localhost:8080/api/devices
 GET http://localhost:8080/api/devices/{device_id}/metrics
+```
+
+`GET /api/devices` returns v3.1 device objects:
+
+```json
+{
+  "devices": [
+    {
+      "id": "sim-device-001",
+      "is_simulated": true,
+      "connection_status": "connected",
+      "metrics": {
+        "device_id": "sim-device-001",
+        "time": {
+          "measured_at": "2026-04-28T11:51:20.778832Z"
+        },
+        "sample_rate": 25.0,
+        "sensor_temp": 30.9,
+        "bpm": 88.2,
+        "spo2": 95.1,
+        "ratio": 0.5977,
+        "sensor_confidence": 0.959,
+        "signal_quality": {
+          "level": "high",
+          "reason": null,
+          "peak_count": 15,
+          "window_seconds": 10.0,
+          "perfusion_index": 2.8995,
+          "samples_in_window": 250
+        }
+      }
+    }
+  ],
+  "limit": 100,
+  "offset": 0
+}
 ```
 
 Start a fixed-time measurement:
@@ -75,12 +127,49 @@ Measurement start request:
 ```json
 {
   "duration_s": 15,
+  "user_name": "tester",
   "user_id": "1",
+  "project_name": "Demo",
   "project_id": "1"
 }
 ```
 
-`date_from` and `date_to` filter by `started_at`. Date-only values use UTC day bounds.
+All API date-time fields use UTC ISO-8601 strings with a `Z` suffix, for example
+`2026-04-28T11:51:20.778832Z`. `date_from` and `date_to` filter by `started_at`;
+date-only values use UTC day bounds.
+
+Measurement responses use the v3.1 measurement object:
+
+```json
+{
+  "id": "6883cd24-dc32-404a-9081-60d49e376a0b",
+  "is_simulated": true,
+  "user_id": "1",
+  "project_id": "1",
+  "device_id": "sim-device-001",
+  "time": {
+    "started_at": "2026-04-28T11:51:11.734138Z",
+    "finished_at": "2026-04-28T11:51:20.778911Z",
+    "duration_ms": 9045
+  },
+  "status": "completed",
+  "channels": ["ir", "red"],
+  "sample_rate": 25.0,
+  "sensor_temp": 30.9,
+  "bpm": 88.2,
+  "spo2": 95.1,
+  "ratio": 0.5977,
+  "sensor_confidence": 0.959,
+  "signal_quality": {
+    "level": "high",
+    "reason": null,
+    "peak_count": 15,
+    "window_seconds": 10.0,
+    "perfusion_index": 2.8995,
+    "samples_in_window": 250
+  }
+}
+```
 
 Projects API:
 
@@ -100,7 +189,7 @@ Healthcheck:
 GET http://localhost:8080/api/health
 ```
 
-All v3 HTTP JSON responses use this envelope:
+All v3.1 HTTP JSON responses use this envelope:
 
 ```json
 {
@@ -108,8 +197,7 @@ All v3 HTTP JSON responses use this envelope:
   "$meta": {
     "status": "success",
     "time": {
-      "ts": 148073249874239873,
-      "human": "25/02/2026, 00:03:55"
+      "iso": "2026-02-24T22:03:55Z"
     }
   }
 }
@@ -149,7 +237,7 @@ SpO2 is an estimate and must be calibrated per optical sensor, LED current, plac
 
 SpO2 is only emitted when the perfusion index is high enough for oxygen estimation. `MIN_PERFUSION_INDEX` controls contact detection, while `MIN_SPO2_PERFUSION_INDEX` controls whether oxygen is reliable enough to report. `SPO2_OFFSET` can be used after calibration against a reference pulse oximeter.
 
-Measurements are session-based by default. Start a session, keep sending samples to `ws://localhost:8080/ws/devices/{device_id}`, and the backend will collect `MEASUREMENT_DURATION_SECONDS` seconds of data, then emit one final result using the same `VitalSigns` JSON shape as `/api/devices/{device_id}/metrics`. The default duration is 15 seconds.
+Measurements are session-based by default. Start a session, keep sending samples to `ws://localhost:8080/ws/devices/{device_id}`, and the backend will collect `MEASUREMENT_DURATION_SECONDS` seconds of data, then expose one final result using the v3.1 measurement JSON shape. The default duration is 15 seconds.
 
 When no finger/contact is detected, vital values are not emitted as valid readings:
 
@@ -161,6 +249,10 @@ When no finger/contact is detected, vital values are not emitted as valid readin
   "sensor_confidence": 0.0,
   "signal_quality": {
     "level": "no_contact",
+    "peak_count": 0,
+    "window_seconds": 10.0,
+    "perfusion_index": null,
+    "samples_in_window": 250,
     "reason": "finger not detected: optical signal is unstable or exposed"
   }
 }

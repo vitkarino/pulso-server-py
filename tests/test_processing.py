@@ -1,10 +1,14 @@
 import json
 import math
 import unittest
+from datetime import UTC, datetime
+from typing import Any
 
 import numpy as np
 
 from app.config import AppConfig
+from app.main import _api_success, _datetime_for_api, _measurement_for_api, _metrics_for_api
+from app.measurement import RecordingMetadata
 from app.processing.service import PPGProcessingService
 from app.state import MetricsStore
 from app.websocket_handler import WebSocketController
@@ -15,6 +19,7 @@ def _synthetic_payload(
     seconds: int = 18,
     bpm: float = 72.0,
     measurement_id: str | None = None,
+    device_id: str = "A0:B7:65:12:34:56",
 ) -> str:
     count = fs * seconds
     t = np.arange(count) / fs
@@ -31,7 +36,7 @@ def _synthetic_payload(
     samples = [{"ir": float(i), "r": float(r)} for i, r in zip(ir, red, strict=True)]
 
     device = {
-        "id": "A0:B7:65:12:34:56",
+        "id": device_id,
         "temp": 31.75,
         "fs": fs,
         "samples": samples,
@@ -183,7 +188,8 @@ class ProcessingTests(unittest.TestCase):
         raw_payload = _synthetic_payload(seconds=1, measurement_id=started.id)
 
         metrics = service.process_json(raw_payload)
-        live_payload = WebSocketController._live_sample_payload(raw_payload, metrics)
+        controller = WebSocketController(service, metrics_formatter=_metrics_for_api)
+        live_payload = controller._live_sample_payload(raw_payload, metrics)
 
         self.assertIsNotNone(live_payload)
         assert live_payload is not None
@@ -194,6 +200,140 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(live_payload["sample_count"], 25)
         self.assertEqual(len(live_payload["samples"]), 25)
         self.assertEqual(live_payload["metrics"]["device_id"], "A0:B7:65:12:34:56")
+        self.assertIn("measured_at", live_payload["metrics"]["time"])
+        self.assertEqual(live_payload["metrics"]["sample_rate"], 25)
+        self.assertNotIn("timestamp", live_payload["metrics"])
+        self.assertNotIn("fs", live_payload["metrics"])
+
+    def test_api_metrics_use_v31_shape(self) -> None:
+        service = PPGProcessingService(AppConfig(), MetricsStore())
+
+        metrics = service.process_json(_synthetic_payload())
+        payload = _metrics_for_api(metrics)
+
+        self.assertEqual(payload["device_id"], "A0:B7:65:12:34:56")
+        self.assertIn("measured_at", payload["time"])
+        self.assertEqual(payload["sample_rate"], 25)
+        self.assertEqual(payload["sensor_temp"], 31.75)
+        self.assertNotIn("timestamp", payload)
+        self.assertNotIn("fs", payload)
+        self.assertNotIn("temperature", payload)
+        assert isinstance(payload["signal_quality"], dict)
+        self.assertIn("samples_in_window", payload["signal_quality"])
+
+    def test_api_measurement_uses_v31_shape(self) -> None:
+        service = PPGProcessingService(AppConfig(measurement_duration_seconds=15.0), MetricsStore())
+        started = service.start_recording(
+            duration_seconds=15.0,
+            metadata=RecordingMetadata(
+                user_id="1",
+                project_id="1",
+            ),
+            device_id="sim-device-001",
+        )
+        assert started.id is not None
+
+        service.process_json(
+            _synthetic_payload(
+                seconds=18,
+                measurement_id=started.id,
+                device_id="sim-device-001",
+            )
+        )
+        measurement = service.get_measurement("sim-device-001")
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+
+        payload = _measurement_for_api(measurement)
+
+        self.assertEqual(payload["id"], started.id)
+        self.assertTrue(payload["is_simulated"])
+        self.assertEqual(payload["user_id"], "1")
+        self.assertEqual(payload["project_id"], "1")
+        self.assertEqual(payload["device_id"], "sim-device-001")
+        self.assertEqual(payload["status"], "completed")
+        self.assertEqual(payload["channels"], ["ir", "red"])
+        self.assertIn("started_at", payload["time"])
+        self.assertIn("finished_at", payload["time"])
+        self.assertIn("duration_ms", payload["time"])
+        self.assertEqual(payload["sample_rate"], 25)
+        self.assertEqual(payload["sensor_temp"], 31.75)
+        self.assertNotIn("started_at", payload)
+        self.assertNotIn("finished_at", payload)
+        self.assertNotIn("duration_seconds", payload)
+        assert isinstance(payload["signal_quality"], dict)
+        self.assertIn("perfusion_index", payload["signal_quality"])
+
+    def test_api_datetime_format_is_utc_iso_z(self) -> None:
+        value = datetime(2026, 4, 28, 11, 51, 20, 778832, tzinfo=UTC)
+
+        self.assertEqual(_datetime_for_api(value), "2026-04-28T11:51:20.778832Z")
+        self.assertEqual(
+            _datetime_for_api("2026-04-28T14:51:20.778832+03:00"),
+            "2026-04-28T11:51:20.778832Z",
+        )
+
+    def test_api_success_formats_nested_datetimes(self) -> None:
+        response = _api_success(
+            {
+                "created_at": datetime(2026, 4, 28, 11, 51, 20, 778832, tzinfo=UTC),
+                "items": [
+                    {"updated_at": datetime(2026, 4, 28, 12, 0, 0, tzinfo=UTC)},
+                ],
+            }
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(payload["data"]["created_at"], "2026-04-28T11:51:20.778832Z")
+        self.assertEqual(payload["data"]["items"][0]["updated_at"], "2026-04-28T12:00:00Z")
+        self.assertTrue(payload["$meta"]["time"]["iso"].endswith("Z"))
+        self.assertNotIn("ts", payload["$meta"]["time"])
+
+
+class WebSocketControllerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_send_start_waits_for_start_ack(self) -> None:
+        controller = WebSocketController(object(), ack_timeout_seconds=0.05)
+
+        class AckingWebSocket:
+            async def send_json(self, payload: dict[str, Any]) -> None:
+                controller._handle_device_control_message(
+                    json.dumps(
+                        {
+                            "type": "start_ack",
+                            "measurement_id": payload["measurement_id"],
+                        }
+                    ),
+                    "sim-test",
+                )
+
+        controller._connections["sim-test"] = AckingWebSocket()
+
+        sent = await controller.send_start(
+            device_id="sim-test",
+            measurement_id="measurement-1",
+            duration_seconds=10.0,
+        )
+
+        self.assertTrue(sent)
+
+    async def test_send_start_fails_when_start_ack_is_missing(self) -> None:
+        controller = WebSocketController(object(), ack_timeout_seconds=0.01)
+
+        class SilentWebSocket:
+            async def send_json(self, _payload: dict[str, Any]) -> None:
+                return None
+
+        websocket = SilentWebSocket()
+        controller._connections["sim-test"] = websocket
+
+        sent = await controller.send_start(
+            device_id="sim-test",
+            measurement_id="measurement-1",
+            duration_seconds=10.0,
+        )
+
+        self.assertFalse(sent)
+        self.assertNotIn("sim-test", controller._connections)
 
 
 if __name__ == "__main__":

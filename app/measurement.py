@@ -39,10 +39,12 @@ class MeasurementSession:
         recording_id: str,
         device_id: str | None,
         duration_seconds: float | None,
+        metadata: RecordingMetadata,
     ) -> None:
         self.id = recording_id
         self.device_id = device_id
         self.duration_seconds = duration_seconds
+        self.metadata = metadata
         self.started_at = datetime.now(UTC)
         self.completed_at: datetime | None = None
         self.status = "running"
@@ -105,6 +107,8 @@ class MeasurementSession:
 
         return MeasurementState(
             id=self.id,
+            user_id=self.metadata.user_id,
+            project_id=self.metadata.project_id,
             device_id=self.device_id,
             status=self.status,
             started_at=self.started_at,
@@ -326,6 +330,7 @@ class MeasurementManager:
             recording_id=str(uuid4()),
             device_id=device_id,
             duration_seconds=duration_seconds,
+            metadata=metadata,
         )
         self._create_recording(session, metadata)
 
