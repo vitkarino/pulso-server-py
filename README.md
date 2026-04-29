@@ -225,11 +225,10 @@ All v3.1 HTTP JSON responses use this envelope:
 
 The implementation uses a robust sliding-window PPG pipeline:
 
-- Hampel outlier suppression for single-sample spikes.
-- Linear detrending to remove baseline drift.
+- Mean-centering before filtering to remove the DC offset.
 - Butterworth band-pass filtering for the physiological heart-rate band.
 - Peak detection on the filtered IR channel, with median inter-beat interval for BPM.
-- Ratio-of-ratios SpO2 estimation from red and IR AC/DC components.
+- Ratio-of-ratios SpO2 estimation from raw DC and RMS AC of the filtered red/IR channels.
 
 SpO2 is an estimate and must be calibrated per optical sensor, LED current, placement, and enclosure before any real clinical use.
 
