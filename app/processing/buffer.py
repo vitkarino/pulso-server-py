@@ -4,8 +4,8 @@ from threading import RLock
 
 import numpy as np
 
-from app.config import AppConfig
-from app.models import PPGSample
+from app.core.config import AppConfig
+from app.schemas.device import PPGSample
 
 
 @dataclass(frozen=True)

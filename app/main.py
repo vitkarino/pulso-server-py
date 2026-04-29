@@ -9,13 +9,19 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.config import settings
-from app.measurement import RecordingMetadata
-from app.models import MeasurementStartRequest, MeasurementState, VitalSigns
+from app.core.config import settings
+from app.measurements import RecordingMetadata
 from app.processing.service import PPGProcessingService
-from app.recording_repository import RecordingRepository
-from app.state import metrics_store
-from app.websocket_handler import WebSocketController
+from app.realtime.store import metrics_store
+from app.realtime.websocket import WebSocketController
+from app.schemas.measurements import (
+    MeasurementStartRequest,
+    MeasurementState,
+    ProjectPatchRequest,
+    UserPatchRequest,
+)
+from app.schemas.metrics import VitalSigns
+from app.storage.recording_repository import RecordingRepository
 
 app = FastAPI(
     title="Pulso PPG Backend",
@@ -127,6 +133,33 @@ def get_api_device_metrics(device_id: str) -> JSONResponse:
     return _api_success({"metrics": _metrics_for_api(metrics)})
 
 
+@app.delete("/api/devices/{device_id}")
+async def delete_api_device(device_id: str) -> JSONResponse:
+    was_connected = device_id in set(ws_controller.connected_devices())
+    had_metrics = metrics_store.get(device_id) is not None
+    stopped = processing_service.stop_recording_for_device(device_id)
+
+    stop_command_sent = False
+    if was_connected:
+        stop_command_sent = await ws_controller.send_stop(device_id=device_id)
+    disconnected = await ws_controller.disconnect_device(device_id)
+    metrics_deleted = metrics_store.delete(device_id)
+    processing_service.forget_device(device_id)
+
+    if not (was_connected or had_metrics or stopped is not None or disconnected or metrics_deleted):
+        raise HTTPException(status_code=404, detail="device not found")
+
+    return _api_success(
+        {
+            "deleted": True,
+            "device_id": device_id,
+            "stopped_measurement_id": stopped.id if stopped is not None else None,
+            "stop_command_sent": stop_command_sent,
+            "disconnected": disconnected,
+        }
+    )
+
+
 @app.get("/api/projects")
 def list_projects(
     limit: int = Query(default=100, ge=1, le=1000),
@@ -140,6 +173,24 @@ def list_projects(
             "offset": offset,
         }
     )
+
+
+@app.patch("/api/projects/{project_id}")
+def patch_api_project(project_id: int, body: ProjectPatchRequest) -> JSONResponse:
+    _require_database()
+    values = _patch_values(body, non_nullable_fields={"title"})
+    project = recording_repository.update_project(project_id, values)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return _api_success({"project": project})
+
+
+@app.delete("/api/projects/{project_id}")
+def delete_api_project(project_id: int) -> JSONResponse:
+    _require_database()
+    if not recording_repository.delete_project(project_id):
+        raise HTTPException(status_code=404, detail="project not found")
+    return _api_success({"deleted": True, "project_id": project_id})
 
 
 @app.get("/api/users")
@@ -164,6 +215,24 @@ def list_users(
     )
 
 
+@app.patch("/api/users/{user_id}")
+def patch_api_user(user_id: int, body: UserPatchRequest) -> JSONResponse:
+    _require_database()
+    values = _patch_values(body, non_nullable_fields={"name"})
+    user = recording_repository.update_user(user_id, values)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return _api_success({"user": user})
+
+
+@app.delete("/api/users/{user_id}")
+def delete_api_user(user_id: int) -> JSONResponse:
+    _require_database()
+    if not recording_repository.delete_user(user_id):
+        raise HTTPException(status_code=404, detail="user not found")
+    return _api_success({"deleted": True, "user_id": user_id})
+
+
 @app.post("/api/devices/{device_id}/measurements")
 async def start_api_measurement(
     device_id: str,
@@ -185,7 +254,8 @@ async def start_api_measurement(
             device_id=device_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc) == "measurement is already running for device" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
     command_sent = await ws_controller.send_start(
         device_id=device_id,
@@ -207,6 +277,10 @@ async def stop_api_measurement(measurement_id: str) -> JSONResponse:
             await ws_controller.send_stop(device_id=stopped.device_id)
         return _api_success({"measurement": _measurement_for_api(stopped)})
 
+    inactive_state = processing_service.get_recording_state(measurement_id)
+    if inactive_state is not None:
+        raise HTTPException(status_code=409, detail="measurement is not active")
+
     if not processing_service.database_enabled:
         raise HTTPException(status_code=404, detail="measurement not found")
 
@@ -218,7 +292,7 @@ async def stop_api_measurement(measurement_id: str) -> JSONResponse:
             status_code=409,
             detail="measurement is not active in this process",
         )
-    return _api_success({"measurement": _measurement_for_api(measurement)})
+    raise HTTPException(status_code=409, detail="measurement is not active")
 
 
 @app.get("/api/measurements")
@@ -302,6 +376,30 @@ def get_api_measurement_samples(
 def get_api_measurement(measurement_id: str) -> JSONResponse:
     _require_database()
     return _api_success({"measurement": _measurement_for_api(_get_recording_or_404(measurement_id))})
+
+
+@app.delete("/api/measurements/{measurement_id}")
+async def delete_api_measurement(measurement_id: str) -> JSONResponse:
+    _require_database()
+    measurement = _get_recording_or_404(measurement_id)
+    deleted_session = processing_service.delete_recording(measurement_id)
+
+    stop_command_sent = False
+    device_id = _string_or_none(measurement.get("device_id"))
+    was_running = measurement.get("status") == "running"
+    if deleted_session is not None:
+        device_id = deleted_session.device_id or device_id
+        was_running = was_running or deleted_session.status == "running"
+    if was_running and device_id is not None:
+        stop_command_sent = await ws_controller.send_stop(device_id=device_id)
+
+    return _api_success(
+        {
+            "deleted": True,
+            "measurement_id": measurement_id,
+            "stop_command_sent": stop_command_sent,
+        }
+    )
 
 
 @app.websocket("/ws/devices/{device_id}")
@@ -513,6 +611,17 @@ def _is_simulated(device_id: str | None) -> bool:
 
 def _string_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _patch_values(body: object, *, non_nullable_fields: set[str]) -> dict[str, object]:
+    values = body.model_dump(exclude_unset=True) if hasattr(body, "model_dump") else {}
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail="request body must be an object")
+
+    for field_name in non_nullable_fields:
+        if field_name in values and values[field_name] is None:
+            raise HTTPException(status_code=422, detail=f"{field_name} must not be null")
+    return values
 
 
 def _require_database() -> None:

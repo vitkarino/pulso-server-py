@@ -1,6 +1,6 @@
 from threading import RLock
 
-from app.models import VitalSigns
+from app.schemas.metrics import VitalSigns
 
 
 class MetricsStore:
@@ -15,6 +15,10 @@ class MetricsStore:
     def get(self, device_id: str) -> VitalSigns | None:
         with self._lock:
             return self._latest.get(device_id)
+
+    def delete(self, device_id: str) -> bool:
+        with self._lock:
+            return self._latest.pop(device_id, None) is not None
 
     def all(self) -> dict[str, VitalSigns]:
         with self._lock:

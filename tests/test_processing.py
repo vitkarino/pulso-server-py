@@ -1,18 +1,26 @@
 import json
 import math
+import asyncio
+import tempfile
 import unittest
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+from fastapi import HTTPException
+from sqlalchemy import create_engine, text
 
-from app.config import AppConfig
+from app import main as main_module
+from app.core.config import AppConfig
 from app.main import _api_success, _datetime_for_api, _measurement_for_api, _metrics_for_api
-from app.measurement import RecordingMetadata
+from app.measurements import RecordingMetadata
 from app.processing.metrics import VitalSignsCalculator
 from app.processing.service import PPGProcessingService
-from app.state import MetricsStore
-from app.websocket_handler import WebSocketController
+from app.realtime.store import MetricsStore
+from app.realtime.websocket import WebSocketController
+from app.schemas.measurements import MeasurementStartRequest, ProjectPatchRequest, UserPatchRequest
+from app.storage.recording_repository import RecordingRepository
 
 
 def _synthetic_payload(
@@ -242,9 +250,14 @@ class ProcessingTests(unittest.TestCase):
         assert started.id is not None
         raw_payload = _synthetic_payload(seconds=1, measurement_id=started.id)
 
-        metrics = service.process_json(raw_payload)
+        processed = service.process_json_with_recordings_and_signal(raw_payload)
         controller = WebSocketController(service, metrics_formatter=_metrics_for_api)
-        live_payload = controller._live_sample_payload(raw_payload, metrics)
+        live_payload = controller._live_sample_payload(
+            raw_payload,
+            processed.metrics,
+            processed_samples=processed.processed_samples,
+        )
+        raw_samples = json.loads(raw_payload)["device"]["samples"]
 
         self.assertIsNotNone(live_payload)
         assert live_payload is not None
@@ -254,6 +267,9 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(live_payload["fs"], 25)
         self.assertEqual(live_payload["sample_count"], 25)
         self.assertEqual(len(live_payload["samples"]), 25)
+        self.assertEqual(live_payload["samples"], processed.processed_samples)
+        self.assertNotEqual(live_payload["samples"][0]["ir"], raw_samples[0]["ir"])
+        self.assertNotEqual(live_payload["samples"][0]["r"], raw_samples[0]["r"])
         self.assertEqual(live_payload["metrics"]["device_id"], "A0:B7:65:12:34:56")
         self.assertIn("measured_at", live_payload["metrics"]["time"])
         self.assertEqual(live_payload["metrics"]["sample_rate"], 25)
@@ -389,6 +405,166 @@ class WebSocketControllerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(sent)
         self.assertNotIn("sim-test", controller._connections)
+
+
+class ApiMutationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._old_repository = main_module.recording_repository
+        self._old_processing_service = main_module.processing_service
+        self._old_ws_controller = main_module.ws_controller
+        self._old_metrics_store = main_module.metrics_store
+        self._tempdir = tempfile.TemporaryDirectory()
+        database_url = f"sqlite:///{Path(self._tempdir.name) / 'test.db'}"
+        self.repository = RecordingRepository(database_url)
+        self.repository.create_schema()
+        self.metrics_store = MetricsStore()
+        self.processing_service = PPGProcessingService(
+            AppConfig(database_url=database_url),
+            self.metrics_store,
+            self.repository,
+        )
+        main_module.recording_repository = self.repository
+        main_module.processing_service = self.processing_service
+        main_module.metrics_store = self.metrics_store
+        main_module.ws_controller = WebSocketController(
+            self.processing_service,
+            metrics_formatter=main_module._metrics_for_api,
+            ack_timeout_seconds=0.01,
+        )
+
+    def tearDown(self) -> None:
+        main_module.recording_repository = self._old_repository
+        main_module.processing_service = self._old_processing_service
+        main_module.ws_controller = self._old_ws_controller
+        main_module.metrics_store = self._old_metrics_store
+        self.repository.dispose()
+        self._tempdir.cleanup()
+
+    def test_patch_and_delete_user(self) -> None:
+        created = self.repository.create_user({"name": "Alice", "age": 30, "sex": "female"})
+
+        response = main_module.patch_api_user(created["id"], UserPatchRequest(age=31))
+        payload = json.loads(response.body)
+
+        self.assertEqual(payload["data"]["user"]["name"], "Alice")
+        self.assertEqual(payload["data"]["user"]["age"], 31)
+
+        response = main_module.delete_api_user(created["id"])
+        payload = json.loads(response.body)
+
+        self.assertTrue(payload["data"]["deleted"])
+        self.assertIsNone(self.repository.get_user(created["id"]))
+
+    def test_patch_and_delete_project(self) -> None:
+        created = self.repository.create_project({"title": "Old", "description": "draft"})
+
+        response = main_module.patch_api_project(
+            created["id"],
+            ProjectPatchRequest(title="New", description=None),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(payload["data"]["project"]["title"], "New")
+        self.assertIsNone(payload["data"]["project"]["description"])
+
+        response = main_module.delete_api_project(created["id"])
+        payload = json.loads(response.body)
+
+        self.assertTrue(payload["data"]["deleted"])
+        self.assertIsNone(self.repository.get_project(created["id"]))
+
+    def test_create_schema_adds_project_description_to_existing_table(self) -> None:
+        database_url = f"sqlite:///{Path(self._tempdir.name) / 'legacy.db'}"
+        engine = create_engine(database_url, future=True)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE projects (
+                        id INTEGER PRIMARY KEY,
+                        title VARCHAR(255) NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        recordings_qty INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+            )
+        engine.dispose()
+
+        repository = RecordingRepository(database_url)
+        repository.create_schema()
+        project = repository.create_project({"title": "Migrated", "description": "exists"})
+
+        self.assertEqual(project["description"], "exists")
+        self.assertEqual(repository.list_projects()[0]["description"], "exists")
+        repository.dispose()
+
+    def test_delete_measurement_removes_recording(self) -> None:
+        started = self.processing_service.start_recording(
+            duration_seconds=15.0,
+            metadata=RecordingMetadata(user_id="1", project_id="1"),
+            device_id="sim-delete-001",
+        )
+        assert started.id is not None
+
+        response = asyncio.run(main_module.delete_api_measurement(started.id))
+        payload = json.loads(response.body)
+
+        self.assertTrue(payload["data"]["deleted"])
+        self.assertEqual(payload["data"]["measurement_id"], started.id)
+        self.assertIsNone(self.repository.get_recording(started.id))
+
+    def test_delete_device_removes_cached_metrics(self) -> None:
+        device_id = "sim-delete-device"
+        self.processing_service.process_json(_synthetic_payload(device_id=device_id))
+        self.assertIsNotNone(self.metrics_store.get(device_id))
+
+        response = asyncio.run(main_module.delete_api_device(device_id))
+        payload = json.loads(response.body)
+
+        self.assertTrue(payload["data"]["deleted"])
+        self.assertEqual(payload["data"]["device_id"], device_id)
+        self.assertIsNone(self.metrics_store.get(device_id))
+
+    def test_start_measurement_rejects_active_measurement_for_same_device(self) -> None:
+        class AckingController:
+            async def send_start(
+                self,
+                *,
+                device_id: str,
+                measurement_id: str,
+                duration_seconds: float | None,
+            ) -> bool:
+                return True
+
+        main_module.ws_controller = AckingController()
+        body = MeasurementStartRequest(duration_s=15)
+        asyncio.run(main_module.start_api_measurement("sim-active-device", body))
+
+        with self.assertRaises(HTTPException) as context:
+            asyncio.run(main_module.start_api_measurement("sim-active-device", body))
+
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertEqual(str(context.exception.detail), "measurement is already running for device")
+
+    def test_stop_measurement_rejects_inactive_measurement(self) -> None:
+        started = self.processing_service.start_recording(
+            duration_seconds=15.0,
+            metadata=RecordingMetadata(user_id="1", project_id="1"),
+            device_id="sim-stop-once",
+        )
+        assert started.id is not None
+
+        first_response = asyncio.run(main_module.stop_api_measurement(started.id))
+        first_payload = json.loads(first_response.body)
+        self.assertEqual(first_payload["data"]["measurement"]["status"], "cancelled")
+
+        with self.assertRaises(HTTPException) as context:
+            asyncio.run(main_module.stop_api_measurement(started.id))
+
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertEqual(str(context.exception.detail), "measurement is not active")
 
 
 if __name__ == "__main__":

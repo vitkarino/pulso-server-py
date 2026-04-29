@@ -6,7 +6,7 @@ from typing import Any, Callable
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from app.models import WebSocketAck
+from app.schemas.websocket import WebSocketAck
 from app.processing.service import PPGProcessingService
 
 
@@ -29,6 +29,18 @@ class WebSocketController:
     def connected_devices(self) -> list[str]:
         with self._lock:
             return sorted(self._connections)
+
+    async def disconnect_device(self, device_id: str) -> bool:
+        with self._lock:
+            websocket = self._connections.pop(device_id, None)
+        if websocket is None:
+            return False
+
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
+        return True
 
     async def send_start(
         self,
@@ -99,9 +111,15 @@ class WebSocketController:
                     continue
 
                 try:
-                    metrics, completed_recordings = self._service.process_json_with_recordings(message)
+                    processed = self._service.process_json_with_recordings_and_signal(message)
+                    metrics = processed.metrics
+                    completed_recordings = processed.completed_recordings
                     ack = WebSocketAck(ok=True, metrics=metrics)
-                    await self._broadcast_live_sample_batch(message, metrics)
+                    await self._broadcast_live_sample_batch(
+                        message,
+                        metrics,
+                        processed_samples=processed.processed_samples,
+                    )
                 except ValidationError as exc:
                     ack = WebSocketAck(ok=False, error=exc.errors()[0]["msg"])
                     completed_recordings = []
@@ -198,8 +216,14 @@ class WebSocketController:
         if start_ack is not None and not start_ack.done():
             start_ack.set_result(None)
 
-    async def _broadcast_live_sample_batch(self, message: str | bytes, metrics: object) -> None:
-        payload = self._live_sample_payload(message, metrics)
+    async def _broadcast_live_sample_batch(
+        self,
+        message: str | bytes,
+        metrics: object,
+        *,
+        processed_samples: list[dict[str, float]] | None = None,
+    ) -> None:
+        payload = self._live_sample_payload(message, metrics, processed_samples=processed_samples)
         if payload is None:
             return
 
@@ -222,7 +246,13 @@ class WebSocketController:
         for subscriber in stale:
             self._unregister_measurement_stream(subscriber)
 
-    def _live_sample_payload(self, message: str | bytes, metrics: object) -> dict[str, Any] | None:
+    def _live_sample_payload(
+        self,
+        message: str | bytes,
+        metrics: object,
+        *,
+        processed_samples: list[dict[str, float]] | None = None,
+    ) -> dict[str, Any] | None:
         try:
             payload = json.loads(message)
         except (TypeError, json.JSONDecodeError):
@@ -241,6 +271,7 @@ class WebSocketController:
         samples = device.get("samples")
         if not isinstance(samples, list):
             return None
+        output_samples = processed_samples if processed_samples is not None else samples
 
         return {
             "type": "measurement_sample_batch",
@@ -248,8 +279,8 @@ class WebSocketController:
             "device_id": device.get("id"),
             "fs": device.get("fs"),
             "temperature": device.get("temp"),
-            "sample_count": len(samples),
-            "samples": samples,
+            "sample_count": len(output_samples),
+            "samples": output_samples,
             "metrics": self._metrics_formatter(metrics),
         }
 

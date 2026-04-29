@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import signal
 
-from app.config import AppConfig
+from app.core.config import AppConfig
 
 
 class PPGNoiseFilter:
@@ -23,15 +23,14 @@ class PPGNoiseFilter:
         if low <= 0 or high <= low:
             return centered
 
-        sos = signal.butter(
+        b, a = signal.butter(
             self._config.filter_order,
             [low, high],
             btype="bandpass",
             fs=fs,
-            output="sos",
         )
 
         try:
-            return signal.sosfiltfilt(sos, centered)
+            return signal.filtfilt(b, a, centered)
         except ValueError:
-            return signal.sosfilt(sos, centered)
+            return centered

@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import signal
 
-from app.config import AppConfig
-from app.models import SignalQuality
+from app.core.config import AppConfig
+from app.schemas.metrics import SignalQuality
 
 
 @dataclass(frozen=True)

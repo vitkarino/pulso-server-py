@@ -23,7 +23,9 @@ from sqlalchemy import (
     desc,
     func,
     insert,
+    inspect,
     select,
+    text,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -139,10 +141,15 @@ class RecordingRepository:
     def enabled(self) -> bool:
         return self._engine is not None
 
+    def dispose(self) -> None:
+        if self._engine is not None:
+            self._engine.dispose()
+
     def create_schema(self) -> None:
         engine = self._require_engine()
         metadata.create_all(engine)
         with engine.begin() as connection:
+            self._ensure_schema_columns(connection)
             self._refresh_recording_counts(connection)
             self._cancel_running_recordings(connection)
 
@@ -210,6 +217,7 @@ class RecordingRepository:
 
     def delete_user(self, user_id: int) -> bool:
         with self._require_engine().begin() as connection:
+            connection.execute(delete(project_users_table).where(project_users_table.c.user_id == user_id))
             result = connection.execute(delete(users_table).where(users_table.c.id == user_id))
         return result.rowcount > 0
 
@@ -262,6 +270,7 @@ class RecordingRepository:
 
     def delete_project(self, project_id: int) -> bool:
         with self._require_engine().begin() as connection:
+            connection.execute(delete(project_users_table).where(project_users_table.c.project_id == project_id))
             result = connection.execute(delete(projects_table).where(projects_table.c.id == project_id))
         return result.rowcount > 0
 
@@ -324,6 +333,18 @@ class RecordingRepository:
                 .where(recordings_table.c.id == recording_id)
                 .values(**values)
             )
+
+    def delete_recording(self, recording_id: str) -> bool:
+        with self._require_engine().begin() as connection:
+            connection.execute(
+                delete(recording_samples_table).where(
+                    recording_samples_table.c.recording_id == recording_id
+                )
+            )
+            result = connection.execute(delete(recordings_table).where(recordings_table.c.id == recording_id))
+            if result.rowcount > 0:
+                self._refresh_recording_counts(connection)
+        return result.rowcount > 0
 
     def _cancel_running_recordings(self, connection: Connection) -> None:
         now = datetime.now(UTC)
@@ -419,6 +440,12 @@ class RecordingRepository:
         if self._engine is None:
             raise RuntimeError("DATABASE_URL is not configured")
         return self._engine
+
+    @staticmethod
+    def _ensure_schema_columns(connection: Connection) -> None:
+        project_columns = {column["name"] for column in inspect(connection).get_columns("projects")}
+        if "description" not in project_columns:
+            connection.execute(text("ALTER TABLE projects ADD COLUMN description TEXT"))
 
     @staticmethod
     def _inserted_id(primary_key: tuple[Any, ...]) -> int:

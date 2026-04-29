@@ -28,7 +28,8 @@ Live signal broadcast for UI charts:
 ws://localhost:8080/ws/measurements/{measurement_id}/stream
 ```
 
-During an active measurement, `/ws/measurements/{measurement_id}/stream` broadcasts each processed device batch:
+During an active measurement, `/ws/measurements/{measurement_id}/stream` broadcasts each processed device batch.
+The `samples` array contains the filtered IR/red signal for the latest device batch:
 
 ```json
 {
@@ -40,8 +41,8 @@ During an active measurement, `/ws/measurements/{measurement_id}/stream` broadca
   "sample_count": 25,
   "samples": [
     {
-      "ir": 133000,
-      "r": 99300
+      "ir": 124.37,
+      "r": 81.42
     }
   ],
   "metrics": {
@@ -72,6 +73,7 @@ Latest metrics:
 ```text
 GET http://localhost:8080/api/devices
 GET http://localhost:8080/api/devices/{device_id}/metrics
+DELETE http://localhost:8080/api/devices/{device_id}
 ```
 
 `GET /api/devices` returns v3.1 device objects:
@@ -116,6 +118,7 @@ Start a fixed-time measurement:
 POST http://localhost:8080/api/devices/{device_id}/measurements
 POST http://localhost:8080/api/measurements/{id}/stop
 GET  http://localhost:8080/api/measurements/{id}
+DELETE http://localhost:8080/api/measurements/{id}
 GET  http://localhost:8080/api/measurements?limit=100&offset=0&date_from=2026-04-01&date_to=2026-04-26
 GET  http://localhost:8080/api/measurements/{id}/samples?limit=1000&offset=0
 GET  http://localhost:8080/api/measurements/{id}/export?format=json
@@ -175,12 +178,35 @@ Projects API:
 
 ```text
 GET http://localhost:8080/api/projects?limit=100&offset=0
+PATCH http://localhost:8080/api/projects/{project_id}
+DELETE http://localhost:8080/api/projects/{project_id}
+```
+
+Project patch request:
+
+```json
+{
+  "title": "Demo",
+  "description": "Updated description"
+}
 ```
 
 Users API:
 
 ```text
 GET http://localhost:8080/api/users?project_id=1&limit=100&offset=0
+PATCH http://localhost:8080/api/users/{user_id}
+DELETE http://localhost:8080/api/users/{user_id}
+```
+
+User patch request:
+
+```json
+{
+  "name": "Alice",
+  "age": 31,
+  "sex": "female"
+}
 ```
 
 Healthcheck:
