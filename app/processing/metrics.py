@@ -62,7 +62,14 @@ class VitalSignsCalculator:
             )
 
         peaks = self._find_peaks(filtered_ir, fs)
-        spo2_estimate = self._estimate_spo2(raw_ir, raw_red, filtered_ir, filtered_red)
+        spo2_estimate = self._estimate_spo2(
+            raw_ir=raw_ir,
+            raw_red=raw_red,
+            filtered_ir=filtered_ir,
+            filtered_red=filtered_red,
+            window_seconds=window_seconds,
+            fs=fs,
+        )
         contact_problem = self._contact_problem(raw_ir, raw_red, spo2_estimate.perfusion_index)
         if contact_problem is not None:
             quality = SignalQuality(
@@ -190,6 +197,8 @@ class VitalSignsCalculator:
         raw_red: np.ndarray,
         filtered_ir: np.ndarray,
         filtered_red: np.ndarray,
+        window_seconds: float,
+        fs: float,
     ) -> SpO2Estimate:
         ir_dc = float(np.mean(raw_ir))
         red_dc = float(np.mean(raw_red))
@@ -198,6 +207,42 @@ class VitalSignsCalculator:
 
         if min(ir_dc, red_dc) <= 0 or ir_ac is None or red_ac is None or min(ir_ac, red_ac) <= 0:
             return SpO2Estimate(spo2=None, ratio=None, perfusion_index=None, reason="SpO2 not reported: no usable AC/DC components")
+
+        perfusion_index = (ir_ac / ir_dc) * 100.0
+        if window_seconds < self._config.stable_spo2_window_seconds:
+            return SpO2Estimate(
+                spo2=None,
+                ratio=None,
+                perfusion_index=float(perfusion_index),
+                reason="SpO2 not reported: waiting for stable RMS window",
+            )
+
+        raw_ir, raw_red, filtered_ir, filtered_red = self._cut_spo2_warmup(
+            raw_ir=raw_ir,
+            raw_red=raw_red,
+            filtered_ir=filtered_ir,
+            filtered_red=filtered_red,
+            fs=fs,
+        )
+        if raw_ir.size == 0:
+            return SpO2Estimate(
+                spo2=None,
+                ratio=None,
+                perfusion_index=float(perfusion_index),
+                reason="SpO2 not reported: waiting for stable RMS window",
+            )
+
+        ir_dc = float(np.mean(raw_ir))
+        red_dc = float(np.mean(raw_red))
+        ir_ac = self._rms_ac(filtered_ir)
+        red_ac = self._rms_ac(filtered_red)
+        if min(ir_dc, red_dc) <= 0 or ir_ac is None or red_ac is None or min(ir_ac, red_ac) <= 0:
+            return SpO2Estimate(
+                spo2=None,
+                ratio=None,
+                perfusion_index=float(perfusion_index),
+                reason="SpO2 not reported: no usable AC/DC components",
+            )
 
         perfusion_index = (ir_ac / ir_dc) * 100.0
         ratio = (red_ac / red_dc) / (ir_ac / ir_dc)
@@ -228,6 +273,28 @@ class VitalSignsCalculator:
             spo2=round(float(spo2), 1),
             ratio=round(float(ratio), 4),
             perfusion_index=float(perfusion_index),
+        )
+
+    def _cut_spo2_warmup(
+        self,
+        *,
+        raw_ir: np.ndarray,
+        raw_red: np.ndarray,
+        filtered_ir: np.ndarray,
+        filtered_red: np.ndarray,
+        fs: float,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        cut_samples = max(0, int(round(self._config.spo2_warmup_cut_seconds * fs)))
+        if cut_samples <= 0:
+            return raw_ir, raw_red, filtered_ir, filtered_red
+        if cut_samples >= raw_ir.size:
+            empty = raw_ir[:0]
+            return empty, raw_red[:0], filtered_ir[:0], filtered_red[:0]
+        return (
+            raw_ir[cut_samples:],
+            raw_red[cut_samples:],
+            filtered_ir[cut_samples:],
+            filtered_red[cut_samples:],
         )
 
     @staticmethod

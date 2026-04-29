@@ -94,6 +94,8 @@ class AppConfig:
     filter_order: int = _int_env("FILTER_ORDER", 4)
 
     min_window_seconds: float = _float_env("MIN_WINDOW_SECONDS", 8.0)
+    stable_spo2_window_seconds: float = _float_env("STABLE_SPO2_WINDOW_SECONDS", 10.0)
+    spo2_warmup_cut_seconds: float = _float_env("SPO2_WARMUP_CUT_SECONDS", 2.0)
     max_window_seconds: float = _float_env("MAX_WINDOW_SECONDS", 20.0)
     measurement_duration_seconds: float = _float_env("MEASUREMENT_DURATION_SECONDS", 15.0)
     print_live_metrics: bool = _bool_env("PRINT_LIVE_METRICS", False)
@@ -109,7 +111,7 @@ class AppConfig:
     spo2_a: float = _float_env("SPO2_A", -45.060)
     spo2_b: float = _float_env("SPO2_B", 30.354)
     spo2_c: float = _float_env("SPO2_C", 94.845)
-    spo2_offset: float = _float_env("SPO2_OFFSET", -1.8)
+    spo2_offset: float = _float_env("SPO2_OFFSET", -0.7)
 
 
 settings = AppConfig()

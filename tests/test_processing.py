@@ -9,6 +9,7 @@ import numpy as np
 from app.config import AppConfig
 from app.main import _api_success, _datetime_for_api, _measurement_for_api, _metrics_for_api
 from app.measurement import RecordingMetadata
+from app.processing.metrics import VitalSignsCalculator
 from app.processing.service import PPGProcessingService
 from app.state import MetricsStore
 from app.websocket_handler import WebSocketController
@@ -100,6 +101,60 @@ class ProcessingTests(unittest.TestCase):
         self.assertGreaterEqual(metrics.sensor_confidence, 0.0)
         self.assertLessEqual(metrics.sensor_confidence, 0.2)
         self.assertEqual(metrics.signal_quality.level, "warming_up")
+
+    def test_processing_waits_for_stable_window_before_reporting_spo2(self) -> None:
+        service = PPGProcessingService(AppConfig(stable_spo2_window_seconds=15.0), MetricsStore())
+
+        metrics = service.process_json(_synthetic_payload(seconds=10))
+
+        self.assertIsNotNone(metrics.bpm)
+        self.assertIsNone(metrics.spo2)
+        self.assertIsNone(metrics.ratio)
+        self.assertEqual(metrics.signal_quality.reason, "SpO2 not reported: waiting for stable RMS window")
+
+    def test_processing_cuts_spo2_warmup_from_rms_window(self) -> None:
+        fs = 25
+        seconds = 12
+        count = fs * seconds
+        t = np.arange(count) / fs
+        pulse = np.sin(2 * math.pi * 72.0 / 60.0 * t)
+        ir_dc = 84_000.0
+        red_dc = 53_000.0
+        ir_ac = 1_500.0
+        normal_ratio = 0.55
+        red_ac = normal_ratio * ir_ac * red_dc / ir_dc
+
+        filtered_ir = ir_ac * pulse
+        filtered_red = red_ac * pulse
+        filtered_red[t < 2.0] = 4.0 * red_ac * pulse[t < 2.0]
+        raw_ir = ir_dc + filtered_ir
+        raw_red = red_dc + filtered_red
+
+        cut_result = VitalSignsCalculator(
+            AppConfig(stable_spo2_window_seconds=8.0, spo2_warmup_cut_seconds=2.0)
+        ).calculate(
+            raw_ir=raw_ir,
+            raw_red=raw_red,
+            filtered_ir=filtered_ir,
+            filtered_red=filtered_red,
+            fs=fs,
+        )
+        no_cut_result = VitalSignsCalculator(
+            AppConfig(stable_spo2_window_seconds=8.0, spo2_warmup_cut_seconds=0.0)
+        ).calculate(
+            raw_ir=raw_ir,
+            raw_red=raw_red,
+            filtered_ir=filtered_ir,
+            filtered_red=filtered_red,
+            fs=fs,
+        )
+
+        self.assertIsNotNone(cut_result.ratio)
+        self.assertIsNotNone(no_cut_result.ratio)
+        assert cut_result.ratio is not None
+        assert no_cut_result.ratio is not None
+        self.assertLessEqual(abs(cut_result.ratio - normal_ratio), 0.05)
+        self.assertGreater(no_cut_result.ratio, cut_result.ratio + 0.2)
 
     def test_processing_rejects_no_finger_like_exposed_signal(self) -> None:
         service = PPGProcessingService(AppConfig(), MetricsStore())

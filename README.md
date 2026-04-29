@@ -229,6 +229,8 @@ The implementation uses a robust sliding-window PPG pipeline:
 - Butterworth band-pass filtering for the physiological heart-rate band.
 - Peak detection on the filtered IR channel, with median inter-beat interval for BPM.
 - Ratio-of-ratios SpO2 estimation from raw DC and RMS AC of the filtered red/IR channels.
+- SpO2 uses its own stable RMS window threshold (`STABLE_SPO2_WINDOW_SECONDS`) and ignores the first
+  `SPO2_WARMUP_CUT_SECONDS` seconds of that RMS window to avoid startup jumps.
 
 SpO2 is an estimate and must be calibrated per optical sensor, LED current, placement, and enclosure before any real clinical use.
 
