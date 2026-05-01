@@ -566,6 +566,39 @@ class ApiMutationTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 409)
         self.assertEqual(str(context.exception.detail), "measurement is not active")
 
+    def test_measurement_samples_endpoint_returns_processed_signal(self) -> None:
+        started = self.processing_service.start_recording(
+            duration_seconds=15.0,
+            metadata=RecordingMetadata(user_id="1", project_id="1"),
+            device_id="sim-samples-processed",
+        )
+        assert started.id is not None
+        raw_payload = _synthetic_payload(
+            seconds=2,
+            measurement_id=started.id,
+            device_id="sim-samples-processed",
+        )
+        raw_samples = json.loads(raw_payload)["device"]["samples"]
+
+        self.processing_service.process_json(raw_payload)
+        response = main_module.get_api_measurement_samples(started.id, limit=10, offset=0)
+        payload = json.loads(response.body)
+        samples = payload["data"]["samples"]
+
+        self.assertEqual(len(samples), 10)
+        self.assertEqual(set(samples[0]), {"ir", "r"})
+        self.assertNotEqual(samples[0]["ir"], raw_samples[0]["ir"])
+        self.assertNotEqual(samples[0]["r"], raw_samples[0]["r"])
+
+        all_processed = self.processing_service.get_recording_processed_samples(
+            started.id,
+            limit=None,
+            offset=0,
+        )
+        paged_response = main_module.get_api_measurement_samples(started.id, limit=5, offset=5)
+        paged_payload = json.loads(paged_response.body)
+        self.assertEqual(paged_payload["data"]["samples"], all_processed[5:10])
+
 
 if __name__ == "__main__":
     unittest.main()

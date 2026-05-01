@@ -361,7 +361,7 @@ def get_api_measurement_samples(
     return _api_success(
         {
             "measurement_id": measurement_id,
-            "samples": processing_service.get_recording_samples(
+            "samples": processing_service.get_recording_processed_samples(
                 measurement_id,
                 limit=limit,
                 offset=offset,

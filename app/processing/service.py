@@ -129,12 +129,19 @@ class PPGProcessingService:
 
         ir_tail = filtered_ir[-sample_count:]
         red_tail = filtered_red[-sample_count:]
+        return PPGProcessingService._sample_dicts_from_arrays(ir_tail, red_tail)
+
+    @staticmethod
+    def _sample_dicts_from_arrays(
+        ir_values: np.ndarray | list[float],
+        red_values: np.ndarray | list[float],
+    ) -> list[dict[str, float]]:
         return [
             {
                 "ir": float(ir),
                 "r": float(red),
             }
-            for ir, red in zip(ir_tail, red_tail, strict=True)
+            for ir, red in zip(ir_values, red_values, strict=True)
         ]
 
     def start_measurement(self, device_id: str, duration_seconds: float | None = None):
@@ -210,6 +217,53 @@ class PPGProcessingService:
     def get_recording_samples(self, recording_id: str, *, limit: int | None, offset: int):
         repository = self._require_recording_repository()
         return repository.list_recording_samples(recording_id, limit=limit, offset=offset)
+
+    def get_recording_processed_samples(
+        self,
+        recording_id: str,
+        *,
+        limit: int | None,
+        offset: int,
+    ) -> list[dict[str, float]]:
+        repository = self._require_recording_repository()
+        recording = repository.get_recording(recording_id)
+        if recording is None:
+            return []
+
+        rows = repository.list_recording_samples(recording_id, limit=None, offset=0)
+        if not rows:
+            return []
+
+        raw_ir: list[float] = []
+        raw_red: list[float] = []
+        for row in rows:
+            raw_data = row.get("raw_data")
+            if not isinstance(raw_data, dict):
+                continue
+            ir = raw_data.get("ir")
+            red = raw_data.get("r", raw_data.get("red"))
+            if ir is None or red is None:
+                continue
+            raw_ir.append(float(ir))
+            raw_red.append(float(red))
+
+        if not raw_ir or not raw_red:
+            return []
+
+        sample_rate = recording.get("sample_rate")
+        if sample_rate is None:
+            processed = self._sample_dicts_from_arrays(raw_ir, raw_red)
+        else:
+            filtered_ir, filtered_red = self._filter.filter_pair(
+                np.asarray(raw_ir, dtype=float),
+                np.asarray(raw_red, dtype=float),
+                float(sample_rate),
+            )
+            processed = self._sample_dicts_from_arrays(filtered_ir, filtered_red)
+
+        if limit is None:
+            return processed[offset:]
+        return processed[offset : offset + limit]
 
     def _require_recording_repository(self) -> RecordingRepository:
         if self._recording_repository is None or not self._recording_repository.enabled:
