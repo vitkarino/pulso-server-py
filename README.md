@@ -36,9 +36,9 @@ The `samples` array contains the filtered IR/red signal for the latest device ba
   "type": "measurement_sample_batch",
   "measurement_id": "measurement uuid",
   "device_id": "F4:65:0B:55:2E:80",
-  "fs": 25,
+  "fs": 133.333333,
   "temperature": 25.6,
-  "sample_count": 25,
+  "sample_count": 64,
   "samples": [
     {
       "ir": 124.37,
@@ -50,7 +50,7 @@ The `samples` array contains the filtered IR/red signal for the latest device ba
     "time": {
       "measured_at": "2026-04-28T11:51:20.778832Z"
     },
-    "sample_rate": 25.0,
+    "sample_rate": 133.333333,
     "sensor_temp": 25.6,
     "bpm": 71.4,
     "spo2": 98.0,
@@ -62,7 +62,7 @@ The `samples` array contains the filtered IR/red signal for the latest device ba
       "peak_count": 15,
       "window_seconds": 10.0,
       "perfusion_index": 2.8,
-      "samples_in_window": 250
+      "samples_in_window": 1334
     }
   }
 }
@@ -90,7 +90,7 @@ DELETE http://localhost:8080/api/devices/{device_id}
         "time": {
           "measured_at": "2026-04-28T11:51:20.778832Z"
         },
-        "sample_rate": 25.0,
+        "sample_rate": 133.333333,
         "sensor_temp": 30.9,
         "bpm": 88.2,
         "spo2": 95.1,
@@ -102,7 +102,7 @@ DELETE http://localhost:8080/api/devices/{device_id}
           "peak_count": 15,
           "window_seconds": 10.0,
           "perfusion_index": 2.8995,
-          "samples_in_window": 250
+          "samples_in_window": 1334
         }
       }
     }
@@ -157,7 +157,7 @@ Measurement responses use the v3.1 measurement object:
   },
   "status": "completed",
   "channels": ["ir", "red"],
-  "sample_rate": 25.0,
+  "sample_rate": 133.333333,
   "sensor_temp": 30.9,
   "bpm": 88.2,
   "spo2": 95.1,
@@ -169,7 +169,7 @@ Measurement responses use the v3.1 measurement object:
     "peak_count": 15,
     "window_seconds": 10.0,
     "perfusion_index": 2.8995,
-    "samples_in_window": 250
+    "samples_in_window": 1334
   }
 }
 ```
@@ -236,7 +236,7 @@ All v3.1 HTTP JSON responses use this envelope:
   "device": {
     "id": "A0:B7:65:12:34:56",
     "temp": 31.75,
-    "fs": 25,
+    "fs": 133.333333,
     "samples": [
       {
         "ir": 84231,

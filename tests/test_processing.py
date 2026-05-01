@@ -24,13 +24,13 @@ from app.storage.recording_repository import RecordingRepository
 
 
 def _synthetic_payload(
-    fs: int = 25,
-    seconds: int = 18,
+    fs: float = 25,
+    seconds: float = 18,
     bpm: float = 72.0,
     measurement_id: str | None = None,
     device_id: str = "A0:B7:65:12:34:56",
 ) -> str:
-    count = fs * seconds
+    count = int(math.ceil(fs * seconds - 1e-9))
     t = np.arange(count) / fs
     freq = bpm / 60.0
     ir_dc = 84_000.0
@@ -60,8 +60,8 @@ def _synthetic_payload(
     )
 
 
-def _synthetic_payload_with_amplitude(ir_ac: float, red_ac: float, fs: int = 25, seconds: int = 18) -> str:
-    count = fs * seconds
+def _synthetic_payload_with_amplitude(ir_ac: float, red_ac: float, fs: float = 25, seconds: float = 18) -> str:
+    count = int(math.ceil(fs * seconds - 1e-9))
     t = np.arange(count) / fs
     freq = 72.0 / 60.0
     ir_dc = 84_000.0
@@ -205,6 +205,24 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(measurement.samples_collected, 375)
         self.assertIsNotNone(measurement.result)
         assert measurement.result is not None
+        self.assertIsNotNone(measurement.result.bpm)
+        self.assertIsNotNone(measurement.result.spo2)
+
+    def test_measurement_session_handles_400hz_divided_by_3_sampling(self) -> None:
+        fs = 400.0 / 3.0
+        service = PPGProcessingService(AppConfig(measurement_duration_seconds=15.0), MetricsStore())
+        service.start_measurement("A0:B7:65:12:34:56")
+
+        service.process_json(_synthetic_payload(fs=fs, seconds=18))
+        measurement = service.get_measurement("A0:B7:65:12:34:56")
+
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(measurement.status, "completed")
+        self.assertEqual(measurement.samples_collected, 2000)
+        self.assertIsNotNone(measurement.result)
+        assert measurement.result is not None
+        self.assertAlmostEqual(measurement.result.fs, fs)
         self.assertIsNotNone(measurement.result.bpm)
         self.assertIsNotNone(measurement.result.spo2)
 

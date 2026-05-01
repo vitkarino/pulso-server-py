@@ -4,13 +4,14 @@ Date: 2026-04-26
 Known-good embedded sensor settings
 device_id=F4:65:0B:55:2E:80
 led_brightness=0x1F
-sample_average=4
+sample_average=1
+software_sample_average=3
 led_mode=2
-hardware_sample_rate_hz=100
-reported_sample_rate_hz=25
+hardware_sample_rate_hz=400
+reported_sample_rate_hz=133.333333
 pulse_width_us=411
 adc_range=4096
-batch_size=25
+batch_size=64
 temperature_read_interval_ms=5000
 wifi_reconnect_interval_ms=5000
 
@@ -40,14 +41,14 @@ spo2_c=94.845
 spo2_offset=-1.8
 
 Validated measurement behavior
-10_second_target_samples=250
-15_second_target_samples=375
-baseline_fs_hz=25.0
+10_second_target_samples=1334
+15_second_target_samples=2000
+baseline_fs_hz=133.333333
 reference_spo2_percent=98.0
 reference_bpm_approx=71
 
 Notes
-- The embedded sensor is configured as 100 Hz hardware sample rate with sampleAverage=4.
-- Backend calculations use reported fs=25 Hz, not wall-clock delivery timing.
+- The embedded sensor is configured as 400 Hz hardware sample rate with softwareSampleAverage=3.
+- Backend calculations use reported fs=133.333333 Hz, not wall-clock delivery timing.
 - SpO2 offset -1.8 was calibrated against the observed 98% reference.
-- A clean 10 second run should collect 250 samples.
+- A clean 10 second run should collect 1334 samples.

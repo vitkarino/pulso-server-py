@@ -162,7 +162,7 @@ class MeasurementSession:
     def _samples_for_buffer_duration(self, samples: list[PPGSample]) -> list[PPGSample]:
         if self.duration_seconds is None or self._fs is None:
             return samples
-        target_samples = max(1, int(ceil(self.duration_seconds * self._fs)))
+        target_samples = self._target_sample_count()
         remaining = max(0, target_samples - len(self._ir))
         return samples[:remaining]
 
@@ -236,7 +236,12 @@ class MeasurementSession:
     def _buffer_duration_elapsed(self) -> bool:
         if self.duration_seconds is None or self._fs is None:
             return False
-        return len(self._ir) >= max(1, int(ceil(self.duration_seconds * self._fs)))
+        return len(self._ir) >= self._target_sample_count()
+
+    def _target_sample_count(self) -> int:
+        if self.duration_seconds is None or self._fs is None:
+            return 0
+        return max(1, int(ceil(self.duration_seconds * self._fs - 1e-9)))
 
     def _calculation_fs(self) -> float | None:
         if self._fs is not None:

@@ -5,22 +5,23 @@
 #include <WiFi.h>
 #include <Wire.h>
 
-const char *ssid = "YOUR_WIFI_SSID";
-const char *password = "YOUR_WIFI_PASSWORD";
-const char *server_ip = "192.168.1.100";
+const char *ssid = "Mercusys_2.4G";
+const char *password = "Sfsjmo2768";
+const char *server_ip = "192.168.1.103";
 const uint16_t server_port = 8080;
 const char *deviceId = "F4:65:0B:55:2E:80";
 char wsPath[96];
 
-const byte ledBrightness = 0x1F;
-const byte sampleAverage = 4;
+const byte ledBrightness = 0x30;
+const byte sampleAverage = 1;
+const byte softwareSampleAverage = 3;
 const byte ledMode = 2;
-const int hardwareSampleRate = 100;
-const int reportedSampleRate = 25;
+const int hardwareSampleRate = 400;
+const float reportedSampleRate = (float)hardwareSampleRate / (float)softwareSampleAverage;
 const int pulseWidth = 411;
 const int adcRange = 4096;
 
-const size_t batchSize = 25;
+const size_t batchSize = 64;
 const unsigned long wifiReconnectIntervalMs = 5000;
 const unsigned long temperatureReadIntervalMs = 5000;
 
@@ -50,6 +51,9 @@ unsigned long lastTemperatureReadMs = 0;
 float lastTemperatureC = NAN;
 size_t streamSamplesCollected = 0;
 size_t targetStreamSamples = 0;
+uint64_t averagedIrSum = 0;
+uint64_t averagedRedSum = 0;
+byte averagedSampleCount = 0;
 
 void sendHello();
 void sendLog(const char *message);
@@ -58,6 +62,8 @@ void sendStopAck();
 void sendFinished();
 bool sendBatch();
 void stopStreaming(bool clearMeasurement = true);
+void resetSampleAveraging();
+void flushAveragedSample();
 
 void connectWiFi() {
   WiFi.mode(WIFI_STA);
@@ -193,8 +199,9 @@ void startStreaming(const char *measurementId, unsigned long durationMs) {
   batchCount = 0;
   streamSamplesCollected = 0;
   targetStreamSamples = 0;
+  resetSampleAveraging();
   if (durationMs > 0) {
-    targetStreamSamples = max((size_t)1, (size_t)((durationMs * (unsigned long)reportedSampleRate + 999UL) / 1000UL));
+    targetStreamSamples = max((size_t)1, (size_t)ceil((double)durationMs * (double)reportedSampleRate / 1000.0 - 1e-6));
   }
   canStream = true;
 
@@ -212,6 +219,7 @@ void stopStreaming(bool clearMeasurement) {
   batchCount = 0;
   streamSamplesCollected = 0;
   targetStreamSamples = 0;
+  resetSampleAveraging();
 
   if (clearMeasurement) {
     activeMeasurementId[0] = '\0';
@@ -285,6 +293,10 @@ void addSampleToBatch(uint32_t irValue, uint32_t redValue) {
     return;
   }
 
+  if (targetStreamSamples > 0 && streamSamplesCollected >= targetStreamSamples) {
+    return;
+  }
+
   if (batchCount >= batchSize && !sendBatch()) {
     return;
   }
@@ -305,6 +317,33 @@ void addSampleToBatch(uint32_t irValue, uint32_t redValue) {
   }
 }
 
+void resetSampleAveraging() {
+  averagedIrSum = 0;
+  averagedRedSum = 0;
+  averagedSampleCount = 0;
+}
+
+void flushAveragedSample() {
+  if (averagedSampleCount == 0) {
+    return;
+  }
+
+  uint32_t irValue = (uint32_t)((averagedIrSum + averagedSampleCount / 2) / averagedSampleCount);
+  uint32_t redValue = (uint32_t)((averagedRedSum + averagedSampleCount / 2) / averagedSampleCount);
+  resetSampleAveraging();
+  addSampleToBatch(irValue, redValue);
+}
+
+void addRawSampleToAverager(uint32_t irValue, uint32_t redValue) {
+  averagedIrSum += irValue;
+  averagedRedSum += redValue;
+  averagedSampleCount++;
+
+  if (averagedSampleCount >= softwareSampleAverage) {
+    flushAveragedSample();
+  }
+}
+
 void collectSamplesFromFIFO() {
   particleSensor.check();
 
@@ -313,7 +352,7 @@ void collectSamplesFromFIFO() {
     uint32_t redValue = particleSensor.getFIFORed();
 
     particleSensor.nextSample();
-    addSampleToBatch(irValue, redValue);
+    addRawSampleToAverager(irValue, redValue);
   }
 }
 
@@ -342,6 +381,7 @@ void handleStartCommand(JsonObject payload) {
 }
 
 void handleStopCommand() {
+  flushAveragedSample();
   sendBatch();
   sendStopAck();
   stopStreaming(true);
@@ -420,6 +460,9 @@ void loop() {
   }
 
   if (streamDurationFinished()) {
+    if (targetStreamSamples == 0 || streamSamplesCollected < targetStreamSamples) {
+      flushAveragedSample();
+    }
     sendBatch();
     sendFinished();
     stopStreaming(true);

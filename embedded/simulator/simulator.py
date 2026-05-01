@@ -30,7 +30,7 @@ class SimulatorConfig:
     host: str
     port: int
     device_id: str
-    fs: int
+    fs: float
     batch_size: int
     bpm: float | None
     spo2_ratio: float | None
@@ -174,7 +174,7 @@ class PulsoDeviceSimulator:
         measurement_id: str,
         duration_s: float,
     ) -> None:
-        total_samples = max(1, int(round(duration_s * self._config.fs)))
+        total_samples = max(1, int(math.ceil(duration_s * self._config.fs - 1e-9)))
         sent_samples = 0
         profile = self._active_profile or self._new_profile()
         print(
@@ -288,8 +288,8 @@ def parse_args() -> SimulatorConfig:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--device-id", default="sim-device-001")
-    parser.add_argument("--fs", type=int, default=25)
-    parser.add_argument("--batch-size", type=int, default=25)
+    parser.add_argument("--fs", type=float, default=400.0 / 3.0)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--bpm", type=float, default=None)
     parser.add_argument("--spo2-ratio", type=float, default=None)
     parser.add_argument("--temperature", type=float, default=None)

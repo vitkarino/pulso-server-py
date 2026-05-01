@@ -37,7 +37,7 @@ and then send `finished`.
 Useful options:
 
 ```bash
-python3 embedded/simulator/simulator.py --port 8080 --device-id sim-device-001 --bpm 80 --fs 25
+python3 embedded/simulator/simulator.py --port 8080 --device-id sim-device-001 --bpm 80 --fs 133.333333
 ```
 
 If `--bpm`, `--spo2-ratio`, `--temperature`, or `--noise` are omitted, the simulator picks
