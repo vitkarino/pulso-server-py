@@ -100,6 +100,10 @@ class AppConfig:
     measurement_duration_seconds: float = _float_env("MEASUREMENT_DURATION_SECONDS", 15.0)
     print_live_metrics: bool = _bool_env("PRINT_LIVE_METRICS", False)
     min_peaks: int = _int_env("MIN_PEAKS", 4)
+    quality_model_path: str | None = os.getenv("QUALITY_MODEL_PATH")
+    quality_model_type: str = os.getenv("QUALITY_MODEL_TYPE", "random_forest")
+    quality_model_name: str = os.getenv("QUALITY_MODEL_NAME", "ppg_quality_rf")
+    quality_model_version: str = os.getenv("QUALITY_MODEL_VERSION", "1.0.0")
 
     min_ir_dc: float = _float_env("MIN_IR_DC", 50_000.0)
     min_red_dc: float = _float_env("MIN_RED_DC", 10_000.0)

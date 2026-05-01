@@ -12,7 +12,17 @@ class RecordingMetadata:
 
 
 @dataclass(frozen=True)
-class CompletedRecording:
-    recording_id: str
+class CompletedMeasurement:
+    measurement_id: str
     device_id: str | None
     result: VitalSigns | None
+
+
+@dataclass(frozen=True)
+class RecordingEvent:
+    type: str
+    measurement_id: str
+    recording_id: str
+    sample_start_index: int
+    sample_end_index: int | None
+    samples_count: int | None

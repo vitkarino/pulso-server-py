@@ -6,6 +6,9 @@ from typing import Any, Callable
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from app.core.ids import internal_device_id, public_device_id
+from app.measurements import RecordingEvent
+from app.schemas.measurements import MeasurementState
 from app.schemas.websocket import WebSocketAck
 from app.processing.service import PPGProcessingService
 
@@ -95,7 +98,13 @@ class WebSocketController:
         await websocket.accept()
         with self._lock:
             self._connections[device_id] = websocket
-        await websocket.send_json({"ok": True, "type": "hello_ack", "device_id": device_id})
+        await websocket.send_json(
+            {
+                "type": "hello_ack",
+                "device_id": public_device_id(device_id),
+                "connection_status": "connected",
+            }
+        )
         await self._run_device_loop(websocket, device_id=device_id)
 
     async def _run_device_loop(self, websocket: WebSocket, device_id: str | None) -> None:
@@ -105,15 +114,22 @@ class WebSocketController:
                 hello_device_id = self._handle_hello(websocket, message)
                 if hello_device_id is not None:
                     device_id = hello_device_id
-                    await websocket.send_json({"ok": True, "type": "hello_ack"})
+                    await websocket.send_json(
+                        {
+                            "type": "hello_ack",
+                            "device_id": public_device_id(device_id),
+                            "connection_status": "connected",
+                        }
+                    )
                     continue
-                if self._handle_device_control_message(message, device_id):
+                if await self._handle_device_control_message(message, device_id):
                     continue
 
                 try:
                     processed = self._service.process_json_with_recordings_and_signal(message)
                     metrics = processed.metrics
-                    completed_recordings = processed.completed_recordings
+                    completed_measurements = processed.completed_measurements
+                    recording_events = processed.recording_events
                     ack = WebSocketAck(ok=True, metrics=metrics)
                     await self._broadcast_live_sample_batch(
                         message,
@@ -122,16 +138,23 @@ class WebSocketController:
                     )
                 except ValidationError as exc:
                     ack = WebSocketAck(ok=False, error=exc.errors()[0]["msg"])
-                    completed_recordings = []
+                    completed_measurements = []
+                    recording_events = []
                 except Exception as exc:
                     ack = WebSocketAck(ok=False, error=str(exc))
-                    completed_recordings = []
+                    completed_measurements = []
+                    recording_events = []
 
                 if device_id is None or not ack.ok:
                     await websocket.send_json(ack.model_dump(mode="json"))
-                for recording in completed_recordings:
-                    if recording.device_id is not None:
-                        await self.send_stop(device_id=recording.device_id)
+                for event in recording_events:
+                    await self.broadcast_recording_event(event)
+                for measurement in completed_measurements:
+                    if measurement.device_id is not None:
+                        await self.send_stop(device_id=measurement.device_id)
+                    state = self._service.get_recording_state(measurement.measurement_id)
+                    if state is not None:
+                        await self.broadcast_measurement_finished(state)
         except WebSocketDisconnect:
             if device_id is not None:
                 self._service.stop_recording_for_device(device_id)
@@ -167,7 +190,7 @@ class WebSocketController:
         if not isinstance(payload, dict) or payload.get("type") != "hello":
             return None
 
-        device_id = payload.get("device_id")
+        device_id = internal_device_id(payload.get("device_id"))
         if not isinstance(device_id, str) or not device_id:
             return None
 
@@ -175,7 +198,7 @@ class WebSocketController:
             self._connections[device_id] = websocket
         return device_id
 
-    def _handle_device_control_message(self, message: str, device_id: str | None) -> bool:
+    async def _handle_device_control_message(self, message: str, device_id: str | None) -> bool:
         try:
             payload = json.loads(message)
         except json.JSONDecodeError:
@@ -196,9 +219,16 @@ class WebSocketController:
 
         measurement_id = payload.get("measurement_id")
         if isinstance(measurement_id, str) and measurement_id:
-            self._service.stop_recording(measurement_id)
+            stopped = self._service.stop_measurement(measurement_id)
+            if stopped is not None:
+                measurement, event = stopped
+                if event is not None:
+                    await self.broadcast_recording_event(event)
+                await self.broadcast_measurement_finished(measurement)
         elif device_id is not None:
-            self._service.stop_recording_for_device(device_id)
+            stopped_state = self._service.stop_recording_for_device(device_id)
+            if stopped_state is not None:
+                await self.broadcast_measurement_finished(stopped_state)
         return True
 
     def _connection_for(self, device_id: str) -> WebSocket | None:
@@ -246,6 +276,59 @@ class WebSocketController:
         for subscriber in stale:
             self._unregister_measurement_stream(subscriber)
 
+    async def broadcast_recording_event(self, event: RecordingEvent) -> None:
+        payload: dict[str, Any]
+        if event.type == "recording_started":
+            payload = {
+                "type": "recording_started",
+                "measurement_id": event.measurement_id,
+                "recording_id": event.recording_id,
+                "sample_range": {
+                    "start_index": event.sample_start_index,
+                    "end_index": None,
+                },
+                "timestamp": self._timestamp(),
+            }
+        else:
+            payload = {
+                "type": "recording_stopped",
+                "measurement_id": event.measurement_id,
+                "recording_id": event.recording_id,
+                "sample_range": {
+                    "start_index": event.sample_start_index,
+                    "end_index": event.sample_end_index,
+                },
+                "samples_count": event.samples_count,
+                "timestamp": self._timestamp(),
+            }
+        await self._broadcast_to_measurement(event.measurement_id, payload)
+
+    async def broadcast_measurement_finished(self, measurement: MeasurementState) -> None:
+        if measurement.id is None:
+            return
+        await self._broadcast_to_measurement(
+            measurement.id,
+            {
+                "type": "measurement_finished",
+                "measurement_id": measurement.id,
+                "status": measurement.status,
+                "timestamp": self._timestamp(),
+            },
+        )
+
+    async def _broadcast_to_measurement(self, measurement_id: str, payload: dict[str, Any]) -> None:
+        with self._lock:
+            subscribers = list(self._measurement_subscribers.get(measurement_id, set()))
+
+        stale: list[WebSocket] = []
+        for subscriber in subscribers:
+            try:
+                await subscriber.send_json(payload)
+            except RuntimeError:
+                stale.append(subscriber)
+        for subscriber in stale:
+            self._unregister_measurement_stream(subscriber)
+
     def _live_sample_payload(
         self,
         message: str | bytes,
@@ -262,7 +345,17 @@ class WebSocketController:
             return None
         device = payload.get("device")
         if not isinstance(device, dict):
-            return None
+            if payload.get("type") == "samples":
+                device = {
+                    "id": payload.get("device_id"),
+                    "measurement_id": payload.get("measurement_id"),
+                    "recording_id": payload.get("recording_id"),
+                    "fs": payload.get("sample_rate_hz"),
+                    "temp": payload.get("sensor_temp_c"),
+                    "samples": payload.get("samples"),
+                }
+            else:
+                return None
 
         measurement_id = device.get("measurement_id")
         if not isinstance(measurement_id, str) or not measurement_id:
@@ -271,18 +364,59 @@ class WebSocketController:
         samples = device.get("samples")
         if not isinstance(samples, list):
             return None
-        output_samples = processed_samples if processed_samples is not None else samples
+        sample_rate = device.get("fs")
+        output_samples = self._samples_for_client(
+            raw_samples=samples,
+            processed_samples=processed_samples,
+            sample_rate=sample_rate if isinstance(sample_rate, (int, float)) else None,
+        )
+        state = self._service.get_recording_state(measurement_id)
 
         return {
-            "type": "measurement_sample_batch",
+            "type": "measurement_update",
             "measurement_id": measurement_id,
-            "device_id": device.get("id"),
-            "fs": device.get("fs"),
-            "temperature": device.get("temp"),
-            "sample_count": len(output_samples),
+            "device_id": public_device_id(device.get("id")),
+            "active_recording_id": state.active_recording_id if state is not None else device.get("recording_id"),
+            "timestamp": self._timestamp(),
+            "sample_rate_hz": device.get("fs"),
+            "sensor_temp_c": device.get("temp"),
             "samples": output_samples,
             "metrics": self._metrics_formatter(metrics),
         }
+
+    @staticmethod
+    def _samples_for_client(
+        *,
+        raw_samples: list[Any],
+        processed_samples: list[dict[str, float]] | None,
+        sample_rate: float | None,
+    ) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        processed_samples = processed_samples or []
+        for index, raw_sample in enumerate(raw_samples):
+            raw = raw_sample if isinstance(raw_sample, dict) else {}
+            processed = processed_samples[index] if index < len(processed_samples) else {}
+            sample_index = raw.get("index", index)
+            t_ms = None
+            if isinstance(sample_index, (int, float)) and sample_rate:
+                t_ms = round(float(sample_index) / sample_rate * 1000.0, 3)
+            output.append(
+                {
+                    "index": sample_index,
+                    "t_ms": t_ms,
+                    "ir": raw.get("ir"),
+                    "red": raw.get("red", raw.get("r")),
+                    "ir_filtered": processed.get("ir"),
+                    "red_filtered": processed.get("red", processed.get("r")),
+                }
+            )
+        return output
+
+    @staticmethod
+    def _timestamp() -> str:
+        from datetime import UTC, datetime
+
+        return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     @staticmethod
     def _default_metrics_formatter(metrics: Any) -> object:

@@ -42,7 +42,7 @@ class SimulatorConfig:
 
     @property
     def url(self) -> str:
-        return f"ws://{self.host}:{self.port}/ws/devices/{self.device_id}"
+        return f"ws://{self.host}:{self.port}/ws/devices/{_public_device_id(self.device_id)}"
 
 
 class PulsoDeviceSimulator:
@@ -59,6 +59,15 @@ class PulsoDeviceSimulator:
             try:
                 async with websockets.connect(self._config.url) as websocket:
                     print(f"connected: {self._config.url}", flush=True)
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "type": "hello",
+                                "device_id": _public_device_id(self._config.device_id),
+                                "is_simulated": True,
+                            }
+                        )
+                    )
                     if self._config.auto_start:
                         await self._start_stream(
                             websocket,
@@ -126,7 +135,7 @@ class PulsoDeviceSimulator:
             json.dumps(
                 {
                     "type": "start_ack",
-                    "device_id": self._config.device_id,
+                    "device_id": _public_device_id(self._config.device_id),
                     "measurement_id": measurement_id,
                 }
             )
@@ -142,7 +151,7 @@ class PulsoDeviceSimulator:
                 json.dumps(
                     {
                         "type": "stop_ack",
-                        "device_id": self._config.device_id,
+                        "device_id": _public_device_id(self._config.device_id),
                     }
                 )
             )
@@ -159,7 +168,7 @@ class PulsoDeviceSimulator:
             json.dumps(
                 {
                     "type": "stop_ack",
-                    "device_id": self._config.device_id,
+                    "device_id": _public_device_id(self._config.device_id),
                     "measurement_id": stopped_measurement_id,
                 }
             )
@@ -198,13 +207,13 @@ class PulsoDeviceSimulator:
                 await websocket.send(
                     json.dumps(
                         {
-                            "device": {
-                                "id": self._config.device_id,
-                                "measurement_id": measurement_id,
-                                "temp": profile.temperature,
-                                "fs": self._config.fs,
-                                "samples": samples,
-                            }
+                            "type": "samples",
+                            "device_id": _public_device_id(self._config.device_id),
+                            "measurement_id": measurement_id,
+                            "recording_id": None,
+                            "sample_rate_hz": self._config.fs,
+                            "sensor_temp_c": profile.temperature,
+                            "samples": samples,
                         }
                     )
                 )
@@ -221,8 +230,9 @@ class PulsoDeviceSimulator:
                     json.dumps(
                         {
                             "type": "finished",
-                            "device_id": self._config.device_id,
+                            "device_id": _public_device_id(self._config.device_id),
                             "measurement_id": measurement_id,
+                            "reason": "duration_reached",
                         }
                     )
                 )
@@ -267,8 +277,9 @@ class PulsoDeviceSimulator:
         red_ac = profile.spo2_ratio * profile.ir_ac * profile.red_dc / profile.ir_dc
         phase = 2.0 * math.pi * frequency_hz * t + profile.phase_offset
         return {
+            "index": sample_index,
             "ir": profile.ir_dc + profile.ir_ac * math.sin(phase) + random.gauss(0.0, profile.noise),
-            "r": profile.red_dc + red_ac * math.sin(phase) + random.gauss(0.0, profile.noise * 0.75),
+            "red": profile.red_dc + red_ac * math.sin(phase) + random.gauss(0.0, profile.noise * 0.75),
         }
 
     async def _send_log(self, websocket: websockets.ClientConnection, message: str) -> None:
@@ -276,7 +287,7 @@ class PulsoDeviceSimulator:
             json.dumps(
                 {
                     "type": "log",
-                    "device_id": self._config.device_id,
+                    "device_id": _public_device_id(self._config.device_id),
                     "message": message,
                 }
             )
@@ -336,6 +347,10 @@ def _positive_float(value: object, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _public_device_id(device_id: str) -> str:
+    return device_id if device_id.startswith("dev_") else f"dev_{device_id}"
 
 
 async def amain() -> None:

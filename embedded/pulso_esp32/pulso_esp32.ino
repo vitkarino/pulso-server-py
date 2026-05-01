@@ -5,11 +5,11 @@
 #include <WiFi.h>
 #include <Wire.h>
 
-const char *ssid = "Mercusys_2.4G";
-const char *password = "Sfsjmo2768";
+const char *ssid = "ssid";
+const char *password = "pass";
 const char *server_ip = "192.168.1.103";
 const uint16_t server_port = 8080;
-const char *deviceId = "F4:65:0B:55:2E:80";
+const char *deviceId = "dev_F4:65:0B:55:2E:80";
 char wsPath[96];
 
 const byte ledBrightness = 0x30;
@@ -26,6 +26,7 @@ const unsigned long wifiReconnectIntervalMs = 5000;
 const unsigned long temperatureReadIntervalMs = 5000;
 
 struct PPGSample {
+  uint32_t index;
   uint32_t ir;
   uint32_t red;
 };
@@ -43,7 +44,7 @@ char jsonBuffer[8192];
 
 bool wsConnected = false;
 bool canStream = false;
-char activeMeasurementId[40] = "";
+char activeMeasurementId[48] = "";
 unsigned long streamStartedAtMs = 0;
 unsigned long streamDurationMs = 0;
 unsigned long lastWiFiReconnectMs = 0;
@@ -142,6 +143,9 @@ void sendControl(const char *type) {
   controlDoc.clear();
   controlDoc["type"] = type;
   controlDoc["device_id"] = deviceId;
+  if (strcmp(type, "hello") == 0) {
+    controlDoc["is_simulated"] = false;
+  }
   if (activeMeasurementId[0] != '\0') {
     controlDoc["measurement_id"] = activeMeasurementId;
   }
@@ -184,7 +188,20 @@ void sendStopAck() {
 }
 
 void sendFinished() {
-  sendControl("finished");
+  if (!wsConnected) {
+    return;
+  }
+
+  controlDoc.clear();
+  controlDoc["type"] = "finished";
+  controlDoc["device_id"] = deviceId;
+  controlDoc["measurement_id"] = activeMeasurementId;
+  controlDoc["reason"] = "duration_reached";
+
+  size_t bytesWritten = serializeJson(controlDoc, jsonBuffer, sizeof(jsonBuffer));
+  if (bytesWritten > 0 && bytesWritten < sizeof(jsonBuffer)) {
+    webSocket.sendTXT(jsonBuffer, bytesWritten);
+  }
 }
 
 void startStreaming(const char *measurementId, unsigned long durationMs) {
@@ -237,10 +254,10 @@ bool sendBatch() {
   }
 
   batchDoc.clear();
-  JsonObject device = batchDoc["device"].to<JsonObject>();
-  device["id"] = deviceId;
-  device["measurement_id"] = activeMeasurementId;
-  device["fs"] = reportedSampleRate;
+  batchDoc["type"] = "samples";
+  batchDoc["device_id"] = deviceId;
+  batchDoc["measurement_id"] = activeMeasurementId;
+  batchDoc["sample_rate_hz"] = reportedSampleRate;
 
   unsigned long now = millis();
   if (isnan(lastTemperatureC) || now - lastTemperatureReadMs >= temperatureReadIntervalMs) {
@@ -248,10 +265,10 @@ bool sendBatch() {
     lastTemperatureReadMs = now;
   }
   if (!isnan(lastTemperatureC)) {
-    device["temp"] = lastTemperatureC;
+    batchDoc["sensor_temp_c"] = lastTemperatureC;
   }
 
-  JsonArray samples = device["samples"].to<JsonArray>();
+  JsonArray samples = batchDoc["samples"].to<JsonArray>();
   for (size_t i = 0; i < batchCount; i++) {
     JsonObject sample = samples.add<JsonObject>();
     if (sample.isNull()) {
@@ -259,8 +276,9 @@ bool sendBatch() {
       batchCount = 0;
       return false;
     }
+    sample["index"] = sampleBatch[i].index;
     sample["ir"] = sampleBatch[i].ir;
-    sample["r"] = sampleBatch[i].red;
+    sample["red"] = sampleBatch[i].red;
   }
 
   size_t needed = measureJson(batchDoc) + 1;
@@ -307,6 +325,7 @@ void addSampleToBatch(uint32_t irValue, uint32_t redValue) {
     return;
   }
 
+  sampleBatch[batchCount].index = streamSamplesCollected;
   sampleBatch[batchCount].ir = irValue;
   sampleBatch[batchCount].red = redValue;
   batchCount++;

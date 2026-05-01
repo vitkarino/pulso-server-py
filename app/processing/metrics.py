@@ -12,7 +12,6 @@ class CalculationResult:
     bpm: float | None
     spo2: float | None
     ratio: float | None
-    sensor_confidence: float
     quality: SignalQuality
 
 
@@ -46,7 +45,6 @@ class VitalSignsCalculator:
     ) -> CalculationResult:
         window_seconds = len(raw_ir) / fs
         if window_seconds < self._config.min_window_seconds:
-            confidence = self._clamp(window_seconds / self._config.min_window_seconds * 0.2)
             quality = SignalQuality(
                 level="warming_up",
                 samples_in_window=len(raw_ir),
@@ -57,7 +55,6 @@ class VitalSignsCalculator:
                 bpm=None,
                 spo2=None,
                 ratio=None,
-                sensor_confidence=round(confidence, 3),
                 quality=quality,
             )
 
@@ -86,12 +83,11 @@ class VitalSignsCalculator:
                 bpm=None,
                 spo2=None,
                 ratio=None,
-                sensor_confidence=0.0,
                 quality=quality,
             )
 
         bpm_estimate = self._estimate_bpm(filtered_ir, fs, peaks)
-        confidence = self._sensor_confidence(
+        confidence = self._quality_confidence(
             window_seconds=window_seconds,
             bpm=bpm_estimate.bpm,
             spo2=spo2_estimate.spo2,
@@ -123,7 +119,6 @@ class VitalSignsCalculator:
             bpm=bpm_estimate.bpm,
             spo2=spo2_estimate.spo2,
             ratio=spo2_estimate.ratio,
-            sensor_confidence=round(confidence, 3),
             quality=quality,
         )
 
@@ -341,7 +336,7 @@ class VitalSignsCalculator:
             return "medium"
         return "high"
 
-    def _sensor_confidence(
+    def _quality_confidence(
         self,
         window_seconds: float,
         bpm: float | None,

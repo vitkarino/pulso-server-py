@@ -17,22 +17,21 @@ python3 embedded/simulator/simulator.py --port 8080 --device-id sim-device-001
 Start a measurement from Postman:
 
 ```text
-POST http://127.0.0.1:8080/api/devices/sim-device-001/measurements
+POST http://127.0.0.1:8080/api/devices/dev_sim-device-001/measurements
 ```
 
 Body:
 
 ```json
 {
-  "duration_s": 15,
-  "user_name": "tester",
-  "user_id": "1",
-  "project_id": "1"
+  "user_id": "usr_1",
+  "project_id": "prj_1"
 }
 ```
 
 The simulator will receive the `start` command, send synthetic PPG batches with `measurement_id`,
-and then send `finished`.
+and then send `finished`. Use `POST /api/measurements/{measurement_id}/recording` to persist
+samples during the live session.
 
 Useful options:
 
