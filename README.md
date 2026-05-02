@@ -215,6 +215,35 @@ QUALITY_MODEL_NAME=ppg_quality_rf
 QUALITY_MODEL_VERSION=1.0.0
 ```
 
+### Train BUT-PPG Random Forest
+
+The repository can train a reproducible Random Forest quality model from the
+local Brno University of Technology Smartphone PPG database:
+
+```bash
+python3 scripts/train_but_ppg_quality_rf.py \
+  --dataset brno-university-of-technology-smartphone-ppg-database-but-ppg-2.0.0 \
+  --output models/ppg_quality_rf.joblib
+```
+
+The script maps BUT-PPG `Quality=0` to `low` and `Quality=1` to `high`, extracts
+the same features used by the API, evaluates with grouped subject splits, and
+writes a metrics report next to the model:
+
+```text
+models/ppg_quality_rf.metrics.json
+```
+
+Use the generated model at runtime with:
+
+```bash
+QUALITY_MODEL_PATH=models/ppg_quality_rf.joblib
+```
+
+BUT-PPG is RGB smartphone PPG, while this project records MAX30105 IR/Red PPG.
+The generated model is a useful first-pass quality estimator, but production
+accuracy should be calibrated with recordings from the target hardware.
+
 ## Test
 
 ```bash

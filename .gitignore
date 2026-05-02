@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 venv/
 .env
+models/*.joblib
+models/*.pkl
+models/*.metrics.json
+brno-university-of-technology-smartphone-ppg-database-but-ppg-2.0.0

@@ -420,7 +420,7 @@ def _non_outlier_mask(values: np.ndarray) -> np.ndarray:
 
 def _normalize_label(label: object) -> str:
     if isinstance(label, (int, np.integer)):
-        return {0: "low", 1: "medium", 2: "high"}.get(int(label), "low")
+        return {0: "low", 1: "high", 2: "high"}.get(int(label), "low")
     normalized = str(label).lower()
     if normalized in {"high", "medium", "low"}:
         return normalized
