@@ -79,6 +79,9 @@ GET    /api/recordings/{recording_id}/export?format=json|csv
 POST   /api/recordings/{recording_id}/quality-analysis
 GET    /api/recordings/{recording_id}/quality-analysis
 
+GET    /api/assistant/status
+POST   /api/assistant/chat
+
 POST   /api/users
 GET    /api/users?project_id=&limit=100&offset=0
 GET    /api/users/{user_id}
@@ -213,6 +216,68 @@ Model metadata defaults to:
 QUALITY_MODEL_TYPE=random_forest
 QUALITY_MODEL_NAME=ppg_quality_rf
 QUALITY_MODEL_VERSION=1.0.0
+```
+
+## Assistant Chat
+
+`POST /api/assistant/chat` asks an LLM-backed data assistant a question about a
+completed recording. The assistant can only use the recording row and the
+stored ML `quality-analysis`; it does not receive raw samples.
+
+Request:
+
+```json
+{
+  "recording_id": "rec_23424545665345",
+  "message": "Why is this recording quality low?"
+}
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "assistant": {
+      "recording_id": "rec_23424545665345",
+      "quality_analysis_id": "qlt_6883cd24-dc32-404a-9081-60d49e376a0b",
+      "timestamp": "2026-05-03T12:00:00Z",
+      "provider": {
+        "type": "ollama",
+        "model": "llama3.1:8b"
+      },
+      "message": "The ML quality analysis indicates..."
+    }
+  }
+}
+```
+
+Required preconditions:
+
+- the database is configured;
+- the recording exists and has `status=completed`;
+- `POST /api/recordings/{recording_id}/quality-analysis` has already completed.
+
+Assistant configuration:
+
+```text
+LLM_ENABLED=true
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=...
+LLM_MODEL=gpt-4.1-mini
+LLM_TIMEOUT_SECONDS=30
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=500
+```
+
+For local Ollama:
+
+```text
+LLM_ENABLED=true
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://localhost:11434
+LLM_MODEL=llama3.1:8b
 ```
 
 ### Train BUT-PPG Random Forest

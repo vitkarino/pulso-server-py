@@ -105,6 +105,15 @@ class AppConfig:
     quality_model_name: str = os.getenv("QUALITY_MODEL_NAME", "ppg_quality_rf")
     quality_model_version: str = os.getenv("QUALITY_MODEL_VERSION", "1.0.0")
 
+    llm_enabled: bool = _bool_env("LLM_ENABLED", False)
+    llm_provider: str = os.getenv("LLM_PROVIDER", "openai_compatible")
+    llm_base_url: str | None = os.getenv("LLM_BASE_URL")
+    llm_api_key: str | None = os.getenv("LLM_API_KEY")
+    llm_model: str | None = os.getenv("LLM_MODEL")
+    llm_timeout_seconds: float = _float_env("LLM_TIMEOUT_SECONDS", 30.0)
+    llm_temperature: float = _float_env("LLM_TEMPERATURE", 0.2)
+    llm_max_tokens: int = _int_env("LLM_MAX_TOKENS", 500)
+
     min_ir_dc: float = _float_env("MIN_IR_DC", 50_000.0)
     min_red_dc: float = _float_env("MIN_RED_DC", 10_000.0)
     max_sensor_dc: float = _float_env("MAX_SENSOR_DC", 250_000.0)

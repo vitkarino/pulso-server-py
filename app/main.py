@@ -22,11 +22,13 @@ from app.core.ids import (
     public_recording_id,
     public_user_id,
 )
+from app.llm import AssistantChatResult, AssistantService, LLMProviderError, LLMUnavailable
 from app.measurements import RecordingMetadata
 from app.processing.quality import QualityAnalysisResult, QualityModelUnavailable
 from app.processing.service import PPGProcessingService
 from app.realtime.store import metrics_store
 from app.realtime.websocket import WebSocketController
+from app.schemas.assistant import AssistantChatRequest
 from app.schemas.measurements import (
     MeasurementStartRequest,
     MeasurementState,
@@ -48,6 +50,7 @@ app = FastAPI(
 )
 recording_repository = RecordingRepository(settings.database_url)
 processing_service = PPGProcessingService(settings, metrics_store, recording_repository)
+assistant_service = AssistantService(settings)
 
 
 RECORDING_EXPORT_FIELDS = [
@@ -563,6 +566,44 @@ def get_quality_analysis(recording_id: str) -> JSONResponse:
     )
 
 
+@app.get("/api/assistant/status")
+def get_assistant_status() -> JSONResponse:
+    return _api_success({"assistant": assistant_service.status()})
+
+
+@app.post("/api/assistant/chat")
+def assistant_chat(body: AssistantChatRequest) -> JSONResponse:
+    _require_database()
+    recording = _get_recording_or_404(body.recording_id)
+    if recording.get("status") != "completed":
+        _raise(409, "invalid_status_transition", "Recording must be completed before assistant chat")
+
+    analysis = processing_service.get_quality_analysis(body.recording_id)
+    if analysis is None:
+        _raise(404, "quality_analysis_not_found", "Quality analysis must be completed before assistant chat")
+
+    try:
+        result = assistant_service.chat(
+            recording=recording,
+            quality_analysis=analysis,
+            user_message=body.message,
+        )
+    except LLMUnavailable as exc:
+        _raise(503, "llm_unavailable", str(exc))
+    except LLMProviderError as exc:
+        _raise(502, "llm_provider_error", str(exc))
+
+    return _api_success(
+        {
+            "assistant": _assistant_chat_for_api(
+                result,
+                recording=recording,
+                quality_analysis=analysis,
+            )
+        }
+    )
+
+
 @app.websocket("/ws/devices/{device_id}")
 async def device_websocket_endpoint(websocket: WebSocket, device_id: str) -> None:
     await ws_controller.handle_device(websocket, internal_device_id(device_id) or device_id)
@@ -829,6 +870,21 @@ def _quality_analysis_for_api(
         "model": analysis.get("model"),
         "quality_result": analysis.get("quality_result"),
         "features": analysis.get("features"),
+    }
+
+
+def _assistant_chat_for_api(
+    result: AssistantChatResult,
+    *,
+    recording: dict[str, Any],
+    quality_analysis: dict[str, Any],
+) -> dict[str, object]:
+    return {
+        "recording_id": _public_recording_id_from_row(recording),
+        "quality_analysis_id": quality_analysis.get("public_id") or public_quality_id(quality_analysis.get("id")),
+        "timestamp": _datetime_for_api(result.timestamp),
+        "provider": result.provider,
+        "message": result.message,
     }
 
 

@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, inspect, text
 
 from app import main as main_module
 from app.core.config import AppConfig
+from app.llm import AssistantService
 from app.main import _api_success, _datetime_for_api, _measurement_for_api, _metrics_for_api
 from app.measurements import RecordingMetadata
 from app.processing.quality import extract_morphology, extract_quality_features
@@ -21,6 +22,7 @@ from app.processing.filters import PPGNoiseFilter
 from app.processing.service import PPGProcessingService
 from app.realtime.store import MetricsStore
 from app.realtime.websocket import WebSocketController
+from app.schemas.assistant import AssistantChatRequest
 from app.schemas.measurements import (
     MeasurementStartRequest,
     ProjectCreateRequest,
@@ -37,6 +39,15 @@ class FakeQualityModel:
 
     def predict_proba(self, _values: np.ndarray) -> np.ndarray:
         return np.asarray([[0.02, 0.08, 0.90]])
+
+
+class FakeLLMProvider:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        self.calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
+        return "Запись качественная, поэтому BPM и SpO2 выглядят достаточно надежными."
 
 
 class AckingController:
@@ -294,6 +305,7 @@ class ApiMutationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._old_repository = main_module.recording_repository
         self._old_processing_service = main_module.processing_service
+        self._old_assistant_service = main_module.assistant_service
         self._old_ws_controller = main_module.ws_controller
         self._old_metrics_store = main_module.metrics_store
         self._tempdir = tempfile.TemporaryDirectory()
@@ -309,12 +321,14 @@ class ApiMutationTests(unittest.TestCase):
         self.ws_controller = AckingController()
         main_module.recording_repository = self.repository
         main_module.processing_service = self.processing_service
+        main_module.assistant_service = AssistantService(AppConfig())
         main_module.metrics_store = self.metrics_store
         main_module.ws_controller = self.ws_controller
 
     def tearDown(self) -> None:
         main_module.recording_repository = self._old_repository
         main_module.processing_service = self._old_processing_service
+        main_module.assistant_service = self._old_assistant_service
         main_module.ws_controller = self._old_ws_controller
         main_module.metrics_store = self._old_metrics_store
         self.repository.dispose()
@@ -476,6 +490,11 @@ class ApiMutationTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 503)
         self.assertEqual(context.exception.detail["code"], "quality_model_unavailable")
 
+        with self.assertRaises(HTTPException) as context:
+            main_module.assistant_chat(AssistantChatRequest(recording_id=recording["id"], message="Что с записью?"))
+        self.assertEqual(context.exception.status_code, 404)
+        self.assertEqual(context.exception.detail["code"], "quality_analysis_not_found")
+
         model_path = Path(self._tempdir.name) / "quality.pkl"
         with model_path.open("wb") as model_file:
             pickle.dump(FakeQualityModel(), model_file)
@@ -498,11 +517,31 @@ class ApiMutationTests(unittest.TestCase):
         stored = json.loads(main_module.get_quality_analysis(recording["id"]).body)["data"]["quality_analysis"]
         self.assertEqual(stored["id"], payload["id"])
 
+        fake_provider = FakeLLMProvider()
+        main_module.assistant_service = AssistantService(
+            AppConfig(llm_enabled=True, llm_provider="ollama", llm_model="fake-local-model"),
+            fake_provider,
+        )
+        assistant_response = main_module.assistant_chat(
+            AssistantChatRequest(recording_id=recording["id"], message="Насколько надежны данные?")
+        )
+        assistant_payload = json.loads(assistant_response.body)["data"]["assistant"]
+
+        self.assertEqual(assistant_payload["recording_id"], recording["id"])
+        self.assertEqual(assistant_payload["quality_analysis_id"], payload["id"])
+        self.assertEqual(assistant_payload["provider"]["type"], "ollama")
+        self.assertIn("BPM", assistant_payload["message"])
+        self.assertEqual(len(fake_provider.calls), 1)
+        self.assertIn("quality_result", fake_provider.calls[0]["user_prompt"])
+        self.assertNotIn("raw_data", fake_provider.calls[0]["user_prompt"])
+
     def test_measurement_detail_routes_exist_without_old_recording_exports(self) -> None:
         routes = {(route.path, tuple(sorted(route.methods))) for route in main_module.app.routes if hasattr(route, "methods")}
 
         self.assertTrue(any(path == "/api/measurements" and "GET" in methods for path, methods in routes))
         self.assertTrue(any(path == "/api/measurements/{measurement_id}" and "GET" in methods for path, methods in routes))
+        self.assertTrue(any(path == "/api/assistant/status" and "GET" in methods for path, methods in routes))
+        self.assertTrue(any(path == "/api/assistant/chat" and "POST" in methods for path, methods in routes))
         self.assertFalse(
             any(
                 path in {
