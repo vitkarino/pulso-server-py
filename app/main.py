@@ -9,6 +9,7 @@ from typing import Any, Literal
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import settings
@@ -34,6 +35,7 @@ from app.schemas.measurements import (
     MeasurementState,
     ProjectCreateRequest,
     ProjectPatchRequest,
+    ProjectUserAssignRequest,
     RecordingStartRequest,
     UserCreateRequest,
     UserPatchRequest,
@@ -43,10 +45,17 @@ from app.storage.recording_repository import RecordingRepository
 
 app = FastAPI(
     title="Pulso PPG Backend",
-    version="0.4.0",
+    version="0.4.1",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 recording_repository = RecordingRepository(settings.database_url)
 processing_service = PPGProcessingService(settings, metrics_store, recording_repository)
@@ -224,6 +233,36 @@ def delete_api_project(project_id: str) -> JSONResponse:
     if not recording_repository.delete_project(project_id):
         _raise(404, "project_not_found", "Project not found")
     return _api_success({"deleted": True, "project_id": public_project_id(project_id)})
+
+
+@app.post("/api/projects/{project_id}/users")
+def assign_api_project_user(project_id: str, body: ProjectUserAssignRequest) -> JSONResponse:
+    _require_database()
+    _get_project_or_404(project_id)
+    _get_user_or_404(body.user_id)
+    try:
+        assignment = recording_repository.add_project_user(project_id, body.user_id)
+    except ValueError as exc:
+        if str(exc) == "project user already exists":
+            _raise(409, "project_user_already_exists", "Project user already exists")
+        _raise(400, "validation_error", str(exc))
+    return _api_success({"assignment": _project_user_assignment_for_api(assignment)}, status_code=201)
+
+
+@app.delete("/api/projects/{project_id}/users/{user_id}")
+def delete_api_project_user(project_id: str, user_id: str) -> JSONResponse:
+    _require_database()
+    _get_project_or_404(project_id)
+    _get_user_or_404(user_id)
+    if not recording_repository.delete_project_user(project_id, user_id):
+        _raise(404, "assignment_not_found", "Project user assignment not found")
+    return _api_success(
+        {
+            "deleted": True,
+            "project_id": public_project_id(project_id),
+            "user_id": public_user_id(user_id),
+        }
+    )
 
 
 @app.post("/api/users")
@@ -846,6 +885,14 @@ def _user_for_api(user: dict[str, Any]) -> dict[str, object]:
         "projects_count": user.get("projects_count", 0),
         "recordings_count": user.get("recordings_qty", 0),
         "created_at": _datetime_for_api(user.get("created_at")),
+    }
+
+
+def _project_user_assignment_for_api(assignment: dict[str, Any]) -> dict[str, object]:
+    return {
+        "project_id": public_project_id(assignment.get("project_id")),
+        "user_id": public_user_id(assignment.get("user_id")),
+        "assigned_at": _datetime_for_api(assignment.get("assigned_at")),
     }
 
 

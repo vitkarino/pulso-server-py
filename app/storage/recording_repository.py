@@ -407,7 +407,7 @@ class RecordingRepository:
         with self._require_engine().begin() as connection:
             existing = self._get_project_user(connection, numeric_project_id, numeric_user_id)
             if existing is not None:
-                return existing
+                raise ValueError("project user already exists")
 
             assigned_at = datetime.now(UTC)
             connection.execute(

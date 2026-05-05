@@ -27,6 +27,7 @@ from app.schemas.measurements import (
     MeasurementStartRequest,
     ProjectCreateRequest,
     ProjectPatchRequest,
+    ProjectUserAssignRequest,
     RecordingStartRequest,
     UserCreateRequest,
     UserPatchRequest,
@@ -120,6 +121,42 @@ def _synthetic_payload(
             "timestamp": "2026-04-28T11:51:20.778832Z",
         }
     )
+
+
+async def _asgi_request(method: str, path: str, headers: dict[str, str]) -> dict[str, Any]:
+    sent: list[dict[str, Any]] = []
+    received = False
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode("ascii"),
+        "query_string": b"",
+        "headers": [(name.lower().encode("ascii"), value.encode("ascii")) for name, value in headers.items()],
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8080),
+    }
+
+    async def receive() -> dict[str, Any]:
+        nonlocal received
+        if not received:
+            received = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await main_module.app(scope, receive, send)
+    response_start = next(message for message in sent if message["type"] == "http.response.start")
+    response_headers = {
+        name.decode("latin-1"): value.decode("latin-1")
+        for name, value in response_start.get("headers", [])
+    }
+    return {"status": response_start["status"], "headers": response_headers}
 
 
 def _raw_signal(fs: float = 25, seconds: float = 18, bpm: float = 72.0) -> tuple[np.ndarray, np.ndarray]:
@@ -341,6 +378,23 @@ class ApiMutationTests(unittest.TestCase):
         project_id = json.loads(project_response.body)["data"]["project"]["id"]
         return user_id, project_id
 
+    def test_cors_preflight_allows_local_frontend(self) -> None:
+        response = asyncio.run(
+            _asgi_request(
+                "OPTIONS",
+                "/api/projects",
+                {
+                    "origin": "http://localhost:3000",
+                    "access-control-request-method": "POST",
+                    "access-control-request-headers": "content-type",
+                },
+            )
+        )
+
+        self.assertEqual(response["status"], 200)
+        self.assertEqual(response["headers"]["access-control-allow-origin"], "http://localhost:3000")
+        self.assertIn("POST", response["headers"]["access-control-allow-methods"])
+
     def test_user_and_project_crud_use_public_ids(self) -> None:
         user_id, project_id = self._create_user_project()
 
@@ -358,6 +412,45 @@ class ApiMutationTests(unittest.TestCase):
         self.assertIsNone(patched_project["description"])
         self.assertEqual(json.loads(main_module.get_api_user(user_id).body)["data"]["user"]["id"], user_id)
         self.assertEqual(json.loads(main_module.get_api_project(project_id).body)["data"]["project"]["id"], project_id)
+
+    def test_project_user_assignment_routes(self) -> None:
+        user_id, project_id = self._create_user_project()
+
+        assign_response = main_module.assign_api_project_user(project_id, ProjectUserAssignRequest(user_id=user_id))
+        assignment = json.loads(assign_response.body)["data"]["assignment"]
+
+        self.assertEqual(assign_response.status_code, 201)
+        self.assertEqual(assignment["project_id"], project_id)
+        self.assertEqual(assignment["user_id"], user_id)
+        self.assertIsNotNone(assignment["assigned_at"])
+
+        listed_users = json.loads(main_module.list_users(project_id=project_id, limit=100, offset=0).body)["data"]["users"]
+        project = json.loads(main_module.get_api_project(project_id).body)["data"]["project"]
+        user = json.loads(main_module.get_api_user(user_id).body)["data"]["user"]
+
+        self.assertEqual([listed_users[0]["id"]], [user_id])
+        self.assertEqual(project["users_count"], 1)
+        self.assertEqual(user["projects_count"], 1)
+
+        with self.assertRaises(HTTPException) as context:
+            main_module.assign_api_project_user(project_id, ProjectUserAssignRequest(user_id=user_id))
+
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertEqual(context.exception.detail["code"], "project_user_already_exists")
+
+        delete_response = main_module.delete_api_project_user(project_id, user_id)
+        deleted = json.loads(delete_response.body)["data"]
+
+        self.assertTrue(deleted["deleted"])
+        self.assertEqual(deleted["project_id"], project_id)
+        self.assertEqual(deleted["user_id"], user_id)
+        self.assertEqual(json.loads(main_module.get_api_project(project_id).body)["data"]["project"]["users_count"], 0)
+
+        with self.assertRaises(HTTPException) as context:
+            main_module.delete_api_project_user(project_id, user_id)
+
+        self.assertEqual(context.exception.status_code, 404)
+        self.assertEqual(context.exception.detail["code"], "assignment_not_found")
 
     def test_measurement_recording_lifecycle_and_recording_routes(self) -> None:
         user_id, project_id = self._create_user_project()

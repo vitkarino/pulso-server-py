@@ -49,6 +49,13 @@ def _bool_env(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
 def _database_url() -> str | None:
     explicit_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
     if explicit_url:
@@ -86,6 +93,13 @@ class AppConfig:
     host: str = os.getenv("HOST", "0.0.0.0")
     ws_port: int = _int_env("WS_PORT", 8080)
     database_url: str | None = _database_url()
+    cors_origins: tuple[str, ...] = _csv_env(
+        "CORS_ORIGINS",
+        (
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ),
+    )
 
     min_bpm: float = _float_env("MIN_BPM", 40.0)
     max_bpm: float = _float_env("MAX_BPM", 180.0)

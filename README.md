@@ -11,11 +11,13 @@ python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080
 The backend loads `.env` automatically. `DATABASE_URL` or `POSTGRES_DSN` enables persistence.
 If a full DSN is not set, the app can build one from `POSTGRES_HOST`, `POSTGRES_PORT`,
 `POSTGRES_PASSWORD`, `POSTGRES_USER`, and `POSTGRES_DB`.
+`CORS_ORIGINS` can override the comma-separated frontend origins allowed by the API;
+by default `http://localhost:3000` and `http://127.0.0.1:3000` are allowed.
 
 On startup the app creates or migrates `users`, `projects`, `project_users`, `measurements`,
 `recordings`, `recordings_samples`, and `quality_analyses`.
 
-## API v4
+## API v4.1
 
 Public IDs are prefixed:
 
@@ -57,6 +59,8 @@ Errors use explicit codes:
 }
 ```
 
+Project-user assignment errors include `assignment_not_found` and `project_user_already_exists`.
+
 ## HTTP Endpoints
 
 ```text
@@ -93,6 +97,8 @@ GET    /api/projects?limit=100&offset=0
 GET    /api/projects/{project_id}
 PATCH  /api/projects/{project_id}
 DELETE /api/projects/{project_id}
+POST   /api/projects/{project_id}/users
+DELETE /api/projects/{project_id}/users/{user_id}
 ```
 
 Measurement start body:
@@ -109,6 +115,14 @@ Recording start body:
 ```json
 {
   "duration_s": 15
+}
+```
+
+Project user assignment body:
+
+```json
+{
+  "user_id": "usr_1"
 }
 ```
 

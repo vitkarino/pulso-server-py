@@ -64,3 +64,7 @@ class ProjectCreateRequest(BaseModel):
 class ProjectPatchRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1)
     description: str | None = None
+
+
+class ProjectUserAssignRequest(BaseModel):
+    user_id: str = Field(min_length=1)
