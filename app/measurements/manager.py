@@ -49,15 +49,9 @@ class MeasurementManager:
     def start(
         self,
         device_id: str,
-        duration_seconds: float | None = None,
         metadata: RecordingMetadata | None = None,
     ) -> MeasurementState:
-        if duration_seconds is not None and duration_seconds < self._config.min_window_seconds:
-            raise ValueError(
-                f"measurement duration must be at least {self._config.min_window_seconds} seconds"
-            )
         return self.start_measurement(
-            duration_seconds=duration_seconds,
             metadata=metadata or RecordingMetadata(),
             device_id=device_id,
         )
@@ -65,13 +59,9 @@ class MeasurementManager:
     def start_measurement(
         self,
         *,
-        duration_seconds: float | None,
         metadata: RecordingMetadata,
         device_id: str | None = None,
     ) -> MeasurementState:
-        if duration_seconds is not None and duration_seconds <= 0:
-            raise ValueError("measurement duration must be greater than zero seconds")
-
         normalized_metadata = RecordingMetadata(
             user_name=metadata.user_name,
             user_id=public_user_id(metadata.user_id),
@@ -89,7 +79,7 @@ class MeasurementManager:
                 measurement_id=measurement_id,
                 public_measurement_id=new_public_id(MEASUREMENT_PREFIX, measurement_id),
                 device_id=device_id,
-                duration_seconds=duration_seconds,
+                duration_seconds=None,
                 metadata=normalized_metadata,
             )
             self._sessions[session.internal_id] = session
@@ -108,7 +98,6 @@ class MeasurementManager:
         device_id: str | None = None,
     ) -> MeasurementState:
         snapshot = self.start_measurement(
-            duration_seconds=duration_seconds,
             metadata=metadata,
             device_id=device_id,
         )

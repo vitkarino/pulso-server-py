@@ -147,24 +147,19 @@ class PPGProcessingService:
             for ir, red in zip(ir_values, red_values, strict=True)
         ]
 
-    def start_measurement(self, device_id: str, duration_seconds: float | None = None):
+    def start_measurement(self, device_id: str):
         if device_id is not None:
             self._buffers.reset(device_id)
-        return self._measurements.start(
-            device_id,
-            duration_seconds or self._config.measurement_duration_seconds,
-        )
+        return self._measurements.start(device_id)
 
     def start_live_measurement(
         self,
         *,
-        duration_seconds: float | None,
         metadata: RecordingMetadata,
         device_id: str,
     ):
         self._buffers.reset(device_id)
         return self._measurements.start_measurement(
-            duration_seconds=duration_seconds,
             metadata=metadata,
             device_id=device_id,
         )
@@ -178,11 +173,16 @@ class PPGProcessingService:
     ):
         if device_id is not None:
             self._buffers.reset(device_id)
-        return self._measurements.start_recording(
-            duration_seconds=duration_seconds,
+        measurement = self._measurements.start_measurement(
             metadata=metadata,
             device_id=device_id,
         )
+        if measurement.id is not None:
+            self._measurements.start_recording_for_measurement(
+                measurement.id,
+                duration_seconds=duration_seconds,
+            )
+        return self._measurements.get_recording_state(measurement.id or "") or measurement
 
     def start_recording_for_measurement(self, measurement_id: str, duration_seconds: float | None = None):
         return self._measurements.start_recording_for_measurement(

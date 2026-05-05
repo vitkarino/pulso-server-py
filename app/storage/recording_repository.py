@@ -110,6 +110,7 @@ measurements_table = Table(
     Column("sensor_temp", Float, nullable=True),
     Column("bpm", Float, nullable=True),
     Column("spo2", Float, nullable=True),
+    Column("perfusion_index", Float, nullable=True),
     Column("ratio", Float, nullable=True),
     Column("signal_quality", JSON_TYPE, nullable=True),
     Column("peak_count", BigInteger, nullable=True),
@@ -675,6 +676,14 @@ class RecordingRepository:
                     "recordings_qty": "INTEGER NOT NULL DEFAULT 0",
                 },
             )
+        if "measurements" in table_names:
+            _ensure_columns(
+                connection,
+                "measurements",
+                {
+                    "perfusion_index": "FLOAT",
+                },
+            )
         if "recordings" in table_names:
             _ensure_columns(
                 connection,
@@ -755,6 +764,7 @@ class RecordingRepository:
                         sensor_temp=row["sensor_temp"],
                         bpm=row["bpm"],
                         spo2=row["spo2"],
+                        perfusion_index=row["perfusion_index"],
                         ratio=row["ratio"],
                         signal_quality=row["signal_quality"],
                         peak_count=row["peak_count"],

@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SignalQuality(BaseModel):
     level: Literal["warming_up", "no_contact", "low", "medium", "high"]
+    score: float = Field(ge=0.0, le=1.0)
     samples_in_window: int
     window_seconds: float
     perfusion_index: float | None = None

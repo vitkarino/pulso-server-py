@@ -111,7 +111,6 @@ class AppConfig:
     stable_spo2_window_seconds: float = _float_env("STABLE_SPO2_WINDOW_SECONDS", 10.0)
     spo2_warmup_cut_seconds: float = _float_env("SPO2_WARMUP_CUT_SECONDS", 2.0)
     max_window_seconds: float = _float_env("MAX_WINDOW_SECONDS", 20.0)
-    measurement_duration_seconds: float = _float_env("MEASUREMENT_DURATION_SECONDS", 15.0)
     print_live_metrics: bool = _bool_env("PRINT_LIVE_METRICS", False)
     min_peaks: int = _int_env("MIN_PEAKS", 4)
     quality_model_path: str | None = os.getenv("QUALITY_MODEL_PATH")

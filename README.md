@@ -17,7 +17,7 @@ by default `http://localhost:3000` and `http://127.0.0.1:3000` are allowed.
 On startup the app creates or migrates `users`, `projects`, `project_users`, `measurements`,
 `recordings`, `recordings_samples`, and `quality_analyses`.
 
-## API v4.1
+## API v4.2
 
 Public IDs are prefixed:
 
@@ -192,15 +192,12 @@ Client stream updates:
     }
   ],
   "metrics": {
-    "device_id": "dev_sim-device-001",
-    "timestamp": "2026-04-28T11:51:20.778832Z",
-    "sample_rate_hz": 25.0,
-    "sensor_temp_c": 30.9,
     "bpm": 88.2,
     "spo2": 95.1,
     "ratio": 0.5977,
     "live_quality": {
       "level": "high",
+      "score": 0.91,
       "is_recording_ready": true,
       "reason": null
     }

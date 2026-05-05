@@ -37,7 +37,7 @@ class SimulatorConfig:
     temperature: float | None
     noise: float | None
     auto_start: bool
-    auto_duration_s: float
+    auto_duration_s: float | None
     once: bool
 
     @property
@@ -106,7 +106,7 @@ class PulsoDeviceSimulator:
                 if not isinstance(measurement_id, str) or not measurement_id:
                     await self._send_log(websocket, "start command without measurement_id")
                     continue
-                duration_s = _positive_float(message.get("duration"), self._config.auto_duration_s)
+                duration_s = _positive_float(message.get("duration"))
                 print(
                     f"start command received: measurement_id={measurement_id}, duration_s={duration_s}",
                     flush=True,
@@ -125,7 +125,7 @@ class PulsoDeviceSimulator:
         self,
         websocket: websockets.ClientConnection,
         measurement_id: str,
-        duration_s: float,
+        duration_s: float | None,
     ) -> None:
         if self._active_task is not None and not self._active_task.done():
             self._active_task.cancel()
@@ -181,13 +181,17 @@ class PulsoDeviceSimulator:
         self,
         websocket: websockets.ClientConnection,
         measurement_id: str,
-        duration_s: float,
+        duration_s: float | None,
     ) -> None:
-        total_samples = max(1, int(math.ceil(duration_s * self._config.fs - 1e-9)))
+        total_samples = (
+            max(1, int(math.ceil(duration_s * self._config.fs - 1e-9)))
+            if duration_s is not None
+            else None
+        )
         sent_samples = 0
         profile = self._active_profile or self._new_profile()
         print(
-            f"stream started: measurement_id={measurement_id}, duration_s={duration_s}, samples={total_samples}",
+            f"stream started: measurement_id={measurement_id}, duration_s={duration_s}, samples={total_samples or 'unbounded'}",
             flush=True,
         )
         print(
@@ -198,8 +202,10 @@ class PulsoDeviceSimulator:
         )
 
         try:
-            while sent_samples < total_samples and not self._stop_event.is_set():
-                batch_count = min(self._config.batch_size, total_samples - sent_samples)
+            while (total_samples is None or sent_samples < total_samples) and not self._stop_event.is_set():
+                batch_count = self._config.batch_size
+                if total_samples is not None:
+                    batch_count = min(batch_count, total_samples - sent_samples)
                 samples = [
                     self._sample(sample_index, profile)
                     for sample_index in range(sent_samples, sent_samples + batch_count)
@@ -218,14 +224,15 @@ class PulsoDeviceSimulator:
                     )
                 )
                 sent_samples += batch_count
+                total_label = total_samples if total_samples is not None else "unbounded"
                 print(
-                    f"sent batch: measurement_id={measurement_id}, samples={sent_samples}/{total_samples}",
+                    f"sent batch: measurement_id={measurement_id}, samples={sent_samples}/{total_label}",
                     flush=True,
                 )
-                if sent_samples < total_samples:
+                if total_samples is None or sent_samples < total_samples:
                     await asyncio.sleep(batch_count / self._config.fs)
 
-            if not self._stop_event.is_set():
+            if total_samples is not None and not self._stop_event.is_set():
                 await websocket.send(
                     json.dumps(
                         {
@@ -310,7 +317,7 @@ def parse_args() -> SimulatorConfig:
         action="store_true",
         help="Start streaming immediately without waiting for API start command.",
     )
-    parser.add_argument("--auto-duration-s", type=float, default=15.0)
+    parser.add_argument("--auto-duration-s", type=float, default=None)
     parser.add_argument(
         "--once",
         action="store_true",
@@ -341,12 +348,12 @@ def _decode_json(raw_message: str | bytes) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _positive_float(value: object, default: float) -> float:
+def _positive_float(value: object) -> float | None:
     try:
         parsed = float(value)
     except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _public_device_id(device_id: str) -> str:

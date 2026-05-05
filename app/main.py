@@ -45,7 +45,7 @@ from app.storage.recording_repository import RecordingRepository
 
 app = FastAPI(
     title="Pulso PPG Backend",
-    version="0.4.1",
+    version="0.4.2",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -316,16 +316,13 @@ def delete_api_user(user_id: str) -> JSONResponse:
 @app.post("/api/devices/{device_id}/measurements")
 async def start_api_measurement(
     device_id: str,
-    body: MeasurementStartRequest = Body(default_factory=MeasurementStartRequest),
+    body: MeasurementStartRequest,
 ) -> JSONResponse:
     raw_device_id = internal_device_id(device_id) or device_id
-    if body.user_id is not None:
-        _get_user_or_404(body.user_id)
-    if body.project_id is not None:
-        _get_project_or_404(body.project_id)
+    _get_user_or_404(body.user_id)
+    _get_project_or_404(body.project_id)
     try:
         measurement = processing_service.start_live_measurement(
-            duration_seconds=body.duration_s,
             metadata=RecordingMetadata(
                 user_id=public_user_id(body.user_id),
                 project_id=public_project_id(body.project_id),
@@ -340,7 +337,6 @@ async def start_api_measurement(
     command_sent = await ws_controller.send_start(
         device_id=raw_device_id,
         measurement_id=measurement.id or "",
-        duration_seconds=body.duration_s,
     )
     if not command_sent:
         processing_service.stop_measurement(measurement.id or "")
@@ -371,7 +367,7 @@ async def stop_api_measurement(measurement_id: str) -> JSONResponse:
 @app.post("/api/measurements/{measurement_id}/recording")
 async def start_api_recording(
     measurement_id: str,
-    body: RecordingStartRequest = Body(default_factory=RecordingStartRequest),
+    body: RecordingStartRequest,
 ) -> JSONResponse:
     _require_database()
     try:
@@ -838,11 +834,21 @@ def _metrics_for_api(metrics: VitalSigns) -> dict[str, object]:
     }
 
 
+def _live_metrics_for_api(metrics: VitalSigns) -> dict[str, object]:
+    return {
+        "bpm": metrics.bpm,
+        "spo2": metrics.spo2,
+        "ratio": metrics.ratio,
+        "live_quality": _live_quality_for_api(metrics),
+    }
+
+
 def _live_quality_for_api(metrics: VitalSigns) -> dict[str, object]:
     quality = metrics.signal_quality
     level = quality.level if quality.level in {"high", "medium"} else "low"
     return {
         "level": level,
+        "score": quality.score,
         "is_recording_ready": level in {"high", "medium"},
         "reason": _quality_reason_for_api(quality.reason, level),
     }
@@ -1143,7 +1149,7 @@ def _csv_value(value: object) -> object:
     return value
 
 
-ws_controller = WebSocketController(processing_service, metrics_formatter=_metrics_for_api)
+ws_controller = WebSocketController(processing_service, metrics_formatter=_live_metrics_for_api)
 
 
 if __name__ == "__main__":

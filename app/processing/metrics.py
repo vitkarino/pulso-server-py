@@ -47,6 +47,7 @@ class VitalSignsCalculator:
         if window_seconds < self._config.min_window_seconds:
             quality = SignalQuality(
                 level="warming_up",
+                score=0.0,
                 samples_in_window=len(raw_ir),
                 window_seconds=round(window_seconds, 2),
                 reason="collecting enough samples for a stable window",
@@ -71,6 +72,7 @@ class VitalSignsCalculator:
         if contact_problem is not None:
             quality = SignalQuality(
                 level="no_contact",
+                score=0.0,
                 samples_in_window=len(raw_ir),
                 window_seconds=round(window_seconds, 2),
                 perfusion_index=round(spo2_estimate.perfusion_index, 4)
@@ -107,6 +109,7 @@ class VitalSignsCalculator:
 
         quality = SignalQuality(
             level=level,
+            score=round(confidence, 3),
             samples_in_window=len(raw_ir),
             window_seconds=round(window_seconds, 2),
             perfusion_index=round(spo2_estimate.perfusion_index, 4)

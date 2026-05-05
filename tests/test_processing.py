@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import HTTPException
+from fastapi import HTTPException, WebSocketDisconnect
 from sqlalchemy import create_engine, inspect, text
 
 from app import main as main_module
 from app.core.config import AppConfig
 from app.llm import AssistantService
-from app.main import _api_success, _datetime_for_api, _measurement_for_api, _metrics_for_api
+from app.main import _api_success, _datetime_for_api, _live_metrics_for_api, _measurement_for_api, _metrics_for_api
 from app.measurements import RecordingMetadata
 from app.processing.quality import extract_morphology, extract_quality_features
 from app.processing.filters import PPGNoiseFilter
@@ -61,12 +61,11 @@ class AckingController:
     def connected_devices(self) -> list[str]:
         return ["sim-api-device"]
 
-    async def send_start(self, *, device_id: str, measurement_id: str, duration_seconds: float | None) -> bool:
+    async def send_start(self, *, device_id: str, measurement_id: str) -> bool:
         self.started.append(
             {
                 "device_id": device_id,
                 "measurement_id": measurement_id,
-                "duration_seconds": duration_seconds,
             }
         )
         return True
@@ -177,8 +176,8 @@ class ProcessingTests(unittest.TestCase):
         self.assertIsNotNone(metrics.spo2)
         self.assertIn(metrics.signal_quality.level, {"medium", "high"})
 
-    def test_start_measurement_keeps_default_fixed_duration_for_internal_api(self) -> None:
-        service = PPGProcessingService(AppConfig(measurement_duration_seconds=15.0), MetricsStore())
+    def test_start_measurement_stays_running_without_duration(self) -> None:
+        service = PPGProcessingService(AppConfig(), MetricsStore())
         started = service.start_measurement("A0:B7:65:12:34:56")
         assert started.id is not None
 
@@ -187,12 +186,12 @@ class ProcessingTests(unittest.TestCase):
 
         self.assertIsNotNone(measurement)
         assert measurement is not None
-        self.assertEqual(measurement.status, "completed")
-        self.assertEqual(measurement.samples_collected, 375)
-        self.assertIsNotNone(measurement.result)
+        self.assertEqual(measurement.status, "running")
+        self.assertEqual(measurement.samples_collected, 450)
+        self.assertIsNone(measurement.result)
 
     def test_api_formatters_use_v4_shape(self) -> None:
-        service = PPGProcessingService(AppConfig(measurement_duration_seconds=15.0), MetricsStore())
+        service = PPGProcessingService(AppConfig(), MetricsStore())
         metrics = service.process_json(_synthetic_payload())
         metrics_payload = _metrics_for_api(metrics)
 
@@ -200,6 +199,7 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(metrics_payload["sample_rate_hz"], 25)
         self.assertEqual(metrics_payload["sensor_temp_c"], 31.75)
         self.assertIn("live_quality", metrics_payload)
+        self.assertIn("score", metrics_payload["live_quality"])
         self.assertNotIn("signal_quality", metrics_payload)
 
         started = service.start_recording(
@@ -209,6 +209,7 @@ class ProcessingTests(unittest.TestCase):
         )
         assert started.id is not None
         service.process_json(_synthetic_payload(seconds=18, measurement_id=started.id, device_id="dev_sim-device-001"))
+        service.stop_measurement(started.id)
         measurement = service.get_measurement("sim-device-001")
         assert measurement is not None
         measurement_payload = _measurement_for_api(measurement)
@@ -308,10 +309,32 @@ class WebSocketControllerTests(unittest.IsolatedAsyncioTestCase):
         sent = await controller.send_start(
             device_id="sim-test",
             measurement_id="mes_measurement-1",
-            duration_seconds=10.0,
         )
 
         self.assertTrue(sent)
+
+    async def test_send_stop_unregisters_disconnected_device(self) -> None:
+        controller = WebSocketController(object())
+
+        class DisconnectedWebSocket:
+            async def send_json(self, _payload: dict[str, Any]) -> None:
+                raise WebSocketDisconnect()
+
+        controller._connections["sim-test"] = DisconnectedWebSocket()
+
+        sent = await controller.send_stop(device_id="sim-test")
+
+        self.assertFalse(sent)
+        self.assertNotIn("sim-test", controller._connections)
+
+    async def test_hello_ack_uses_documented_shape(self) -> None:
+        controller = WebSocketController(object())
+        payload = controller._hello_ack_payload("sim-test")
+
+        self.assertEqual(payload["type"], "hello_ack")
+        self.assertEqual(payload["device_id"], "dev_sim-test")
+        self.assertEqual(payload["connection_status"], "connected")
+        self.assertTrue(str(payload["timestamp"]).endswith("Z"))
 
     async def test_live_sample_payload_uses_measurement_update_shape(self) -> None:
         service = PPGProcessingService(AppConfig(), MetricsStore())
@@ -320,7 +343,7 @@ class WebSocketControllerTests(unittest.IsolatedAsyncioTestCase):
         raw_payload = _synthetic_payload(seconds=1, measurement_id=started.id)
 
         processed = service.process_json_with_recordings_and_signal(raw_payload)
-        controller = WebSocketController(service, metrics_formatter=_metrics_for_api)
+        controller = WebSocketController(service, metrics_formatter=_live_metrics_for_api)
         live_payload = controller._live_sample_payload(
             raw_payload,
             processed.metrics,
@@ -335,7 +358,32 @@ class WebSocketControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live_payload["sample_rate_hz"], 25)
         self.assertEqual(live_payload["sensor_temp_c"], 31.75)
         self.assertEqual(set(live_payload["samples"][0]), {"index", "t_ms", "ir", "red", "ir_filtered", "red_filtered"})
-        self.assertIn("live_quality", live_payload["metrics"])
+        self.assertEqual(set(live_payload["metrics"]), {"bpm", "spo2", "ratio", "live_quality"})
+        self.assertIn("score", live_payload["metrics"]["live_quality"])
+
+    async def test_measurement_broadcast_removes_disconnected_subscriber(self) -> None:
+        service = PPGProcessingService(AppConfig(), MetricsStore())
+        started = service.start_measurement("A0:B7:65:12:34:56")
+        assert started.id is not None
+        controller = WebSocketController(service)
+        received: list[dict[str, Any]] = []
+
+        class DisconnectedWebSocket:
+            async def send_json(self, _payload: dict[str, Any]) -> None:
+                raise WebSocketDisconnect()
+
+        class ActiveWebSocket:
+            async def send_json(self, payload: dict[str, Any]) -> None:
+                received.append(payload)
+
+        disconnected = DisconnectedWebSocket()
+        active = ActiveWebSocket()
+        controller._measurement_subscribers[started.id] = {disconnected, active}
+
+        await controller.broadcast_measurement_finished(started)
+
+        self.assertEqual(received[0]["type"], "measurement_finished")
+        self.assertEqual(controller._measurement_subscribers[started.id], {active})
 
 
 class ApiMutationTests(unittest.TestCase):
@@ -495,7 +543,7 @@ class ApiMutationTests(unittest.TestCase):
         self.assertEqual(listed_measurements[0]["id"], measurement_id)
 
         recording_response = asyncio.run(
-            main_module.start_api_recording(measurement_id, RecordingStartRequest(duration_s=None))
+            main_module.start_api_recording(measurement_id, RecordingStartRequest(duration_s=30.0))
         )
         recording = json.loads(recording_response.body)["data"]["recording"]
         recording_id = recording["id"]
@@ -571,7 +619,7 @@ class ApiMutationTests(unittest.TestCase):
             ).body
         )["data"]["measurement"]
         recording = json.loads(
-            asyncio.run(main_module.start_api_recording(measurement["id"], RecordingStartRequest())).body
+            asyncio.run(main_module.start_api_recording(measurement["id"], RecordingStartRequest(duration_s=30.0))).body
         )["data"]["recording"]
         self.processing_service.process_json(
             _synthetic_payload(seconds=18, measurement_id=measurement["id"], device_id="dev_sim-api-device")
@@ -686,6 +734,34 @@ class MigrationTests(unittest.TestCase):
                 connection.execute(
                     text(
                         f"""
+                        CREATE TABLE measurements (
+                            id VARCHAR(36) PRIMARY KEY,
+                            public_id VARCHAR(64),
+                            user_id VARCHAR(64),
+                            project_id VARCHAR(64),
+                            device_id VARCHAR(255),
+                            active_recording_id VARCHAR(36),
+                            started_at DATETIME NOT NULL,
+                            finished_at DATETIME,
+                            duration_ms BIGINT,
+                            status VARCHAR(32) NOT NULL,
+                            signal_type VARCHAR(16) NOT NULL,
+                            sample_rate FLOAT,
+                            sensor_temp FLOAT,
+                            bpm FLOAT,
+                            spo2 FLOAT,
+                            ratio FLOAT,
+                            signal_quality JSON,
+                            peak_count BIGINT,
+                            created_at DATETIME NOT NULL,
+                            updated_at DATETIME NOT NULL
+                        )
+                        """
+                    )
+                )
+                connection.execute(
+                    text(
+                        f"""
                         CREATE TABLE recordings (
                             id VARCHAR(36) PRIMARY KEY,
                             user_name VARCHAR(255),
@@ -776,6 +852,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(recording["project_id"], "prj_1")
             self.assertEqual(len(samples), 1)
             self.assertIn("features", columns)
+            self.assertIn("perfusion_index", measurement_columns)
             self.assertNotIn(legacy_confidence_column, measurement_columns)
             self.assertNotIn(legacy_confidence_column, recording_columns)
             repository.dispose()

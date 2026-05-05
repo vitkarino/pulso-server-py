@@ -35,13 +35,12 @@ class RecordingState(BaseModel):
 
 
 class MeasurementStartRequest(BaseModel):
-    duration_s: float | None = Field(default=None, gt=0)
-    user_id: str | None = Field(default=None, min_length=1)
-    project_id: str | None = Field(default=None, min_length=1)
+    user_id: str = Field(min_length=1)
+    project_id: str = Field(min_length=1)
 
 
 class RecordingStartRequest(BaseModel):
-    duration_s: float | None = Field(default=None, gt=0)
+    duration_s: float = Field(gt=0)
 
 
 class UserCreateRequest(BaseModel):

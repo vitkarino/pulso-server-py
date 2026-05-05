@@ -50,7 +50,6 @@ class WebSocketController:
         *,
         device_id: str,
         measurement_id: str,
-        duration_seconds: float | None,
     ) -> bool:
         websocket = self._connection_for(device_id)
         if websocket is None:
@@ -62,15 +61,13 @@ class WebSocketController:
             "type": "start",
             "measurement_id": measurement_id,
         }
-        if duration_seconds is not None:
-            payload["duration"] = duration_seconds
 
         try:
             with self._lock:
                 self._pending_start_acks[measurement_id] = start_ack
             await websocket.send_json(payload)
             await asyncio.wait_for(start_ack, timeout=self._ack_timeout_seconds)
-        except RuntimeError:
+        except (RuntimeError, WebSocketDisconnect):
             self._unregister(device_id, websocket)
             return False
         except asyncio.TimeoutError:
@@ -89,7 +86,7 @@ class WebSocketController:
 
         try:
             await websocket.send_json({"type": "stop"})
-        except RuntimeError:
+        except (RuntimeError, WebSocketDisconnect):
             self._unregister(device_id, websocket)
             return False
         return True
@@ -98,13 +95,6 @@ class WebSocketController:
         await websocket.accept()
         with self._lock:
             self._connections[device_id] = websocket
-        await websocket.send_json(
-            {
-                "type": "hello_ack",
-                "device_id": public_device_id(device_id),
-                "connection_status": "connected",
-            }
-        )
         await self._run_device_loop(websocket, device_id=device_id)
 
     async def _run_device_loop(self, websocket: WebSocket, device_id: str | None) -> None:
@@ -114,13 +104,7 @@ class WebSocketController:
                 hello_device_id = self._handle_hello(websocket, message)
                 if hello_device_id is not None:
                     device_id = hello_device_id
-                    await websocket.send_json(
-                        {
-                            "type": "hello_ack",
-                            "device_id": public_device_id(device_id),
-                            "connection_status": "connected",
-                        }
-                    )
+                    await websocket.send_json(self._hello_ack_payload(device_id))
                     continue
                 if await self._handle_device_control_message(message, device_id):
                     continue
@@ -167,13 +151,6 @@ class WebSocketController:
             subscribers = self._measurement_subscribers.setdefault(measurement_id, set())
             subscribers.add(websocket)
         try:
-            await websocket.send_json(
-                {
-                    "type": "live_ack",
-                    "ok": True,
-                    "measurement_id": measurement_id,
-                }
-            )
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
@@ -270,7 +247,7 @@ class WebSocketController:
         for subscriber in subscribers:
             try:
                 await subscriber.send_json(payload)
-            except RuntimeError:
+            except (RuntimeError, WebSocketDisconnect):
                 stale.append(subscriber)
 
         for subscriber in stale:
@@ -324,7 +301,7 @@ class WebSocketController:
         for subscriber in subscribers:
             try:
                 await subscriber.send_json(payload)
-            except RuntimeError:
+            except (RuntimeError, WebSocketDisconnect):
                 stale.append(subscriber)
         for subscriber in stale:
             self._unregister_measurement_stream(subscriber)
@@ -417,6 +394,14 @@ class WebSocketController:
         from datetime import UTC, datetime
 
         return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+    def _hello_ack_payload(self, device_id: str) -> dict[str, Any]:
+        return {
+            "type": "hello_ack",
+            "device_id": public_device_id(device_id),
+            "connection_status": "connected",
+            "timestamp": self._timestamp(),
+        }
 
     @staticmethod
     def _default_metrics_formatter(metrics: Any) -> object:
