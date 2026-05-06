@@ -195,7 +195,7 @@ Client stream updates:
     "bpm": 88.2,
     "spo2": 95.1,
     "ratio": 0.5977,
-    "live_quality": {
+    "signal_readiness": {
       "level": "high",
       "score": 0.91,
       "is_recording_ready": true,

@@ -126,6 +126,7 @@ class AppConfig:
     llm_timeout_seconds: float = _float_env("LLM_TIMEOUT_SECONDS", 30.0)
     llm_temperature: float = _float_env("LLM_TEMPERATURE", 0.2)
     llm_max_tokens: int = _int_env("LLM_MAX_TOKENS", 500)
+    llm_reasoning_effort: str | None = os.getenv("LLM_REASONING_EFFORT")
 
     min_ir_dc: float = _float_env("MIN_IR_DC", 50_000.0)
     min_red_dc: float = _float_env("MIN_RED_DC", 10_000.0)

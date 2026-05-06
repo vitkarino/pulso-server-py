@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
+import ssl
 from typing import Any, Protocol
 from urllib import error, request
 
@@ -65,6 +66,7 @@ class AssistantService:
             "provider": self._config.llm_provider,
             "base_url": self._config.llm_base_url or default_base_url,
             "model": self._config.llm_model,
+            "reasoning_effort": self._config.llm_reasoning_effort,
         }
 
     def chat(
@@ -126,6 +128,8 @@ class OpenAICompatibleProvider:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if self._config.llm_reasoning_effort:
+            payload["reasoning_effort"] = self._config.llm_reasoning_effort
         headers = {"Content-Type": "application/json"}
         if self._config.llm_api_key:
             headers["Authorization"] = f"Bearer {self._config.llm_api_key}"
@@ -136,11 +140,14 @@ class OpenAICompatibleProvider:
             timeout=self._config.llm_timeout_seconds,
         )
         try:
-            content = response["choices"][0]["message"]["content"]
+            choice = response["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMProviderError("OpenAI-compatible response has unexpected shape") from exc
         if not isinstance(content, str):
             raise LLMProviderError("OpenAI-compatible response content is not text")
+        if choice.get("finish_reason") == "length":
+            raise LLMProviderError("LLM response was truncated by the token limit; increase LLM_MAX_TOKENS")
         return content
 
 
@@ -187,7 +194,7 @@ def _post_json(
     body = json.dumps(payload).encode("utf-8")
     http_request = request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with request.urlopen(http_request, timeout=timeout) as response:
+        with request.urlopen(http_request, timeout=timeout, context=_ssl_context()) as response:
             raw_body = response.read().decode("utf-8")
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -204,6 +211,14 @@ def _post_json(
     if not isinstance(parsed, dict):
         raise LLMProviderError("LLM provider response envelope is not an object")
     return parsed
+
+
+def _ssl_context() -> ssl.SSLContext:
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def _assistant_context(

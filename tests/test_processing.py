@@ -198,8 +198,8 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(metrics_payload["device_id"], "dev_A0:B7:65:12:34:56")
         self.assertEqual(metrics_payload["sample_rate_hz"], 25)
         self.assertEqual(metrics_payload["sensor_temp_c"], 31.75)
-        self.assertIn("live_quality", metrics_payload)
-        self.assertIn("score", metrics_payload["live_quality"])
+        self.assertIn("signal_readiness", metrics_payload)
+        self.assertIn("score", metrics_payload["signal_readiness"])
         self.assertNotIn("signal_quality", metrics_payload)
 
         started = service.start_recording(
@@ -358,8 +358,8 @@ class WebSocketControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live_payload["sample_rate_hz"], 25)
         self.assertEqual(live_payload["sensor_temp_c"], 31.75)
         self.assertEqual(set(live_payload["samples"][0]), {"index", "t_ms", "ir", "red", "ir_filtered", "red_filtered"})
-        self.assertEqual(set(live_payload["metrics"]), {"bpm", "spo2", "ratio", "live_quality"})
-        self.assertIn("score", live_payload["metrics"]["live_quality"])
+        self.assertEqual(set(live_payload["metrics"]), {"bpm", "spo2", "ratio", "signal_readiness"})
+        self.assertIn("score", live_payload["metrics"]["signal_readiness"])
 
     async def test_measurement_broadcast_removes_disconnected_subscriber(self) -> None:
         service = PPGProcessingService(AppConfig(), MetricsStore())

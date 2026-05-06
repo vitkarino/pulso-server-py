@@ -830,7 +830,7 @@ def _metrics_for_api(metrics: VitalSigns) -> dict[str, object]:
         "bpm": metrics.bpm,
         "spo2": metrics.spo2,
         "ratio": metrics.ratio,
-        "live_quality": _live_quality_for_api(metrics),
+        "signal_readiness": _signal_readiness_for_api(metrics),
     }
 
 
@@ -839,11 +839,11 @@ def _live_metrics_for_api(metrics: VitalSigns) -> dict[str, object]:
         "bpm": metrics.bpm,
         "spo2": metrics.spo2,
         "ratio": metrics.ratio,
-        "live_quality": _live_quality_for_api(metrics),
+        "signal_readiness": _signal_readiness_for_api(metrics),
     }
 
 
-def _live_quality_for_api(metrics: VitalSigns) -> dict[str, object]:
+def _signal_readiness_for_api(metrics: VitalSigns) -> dict[str, object]:
     quality = metrics.signal_quality
     level = quality.level if quality.level in {"high", "medium"} else "low"
     return {
